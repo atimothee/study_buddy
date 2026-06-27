@@ -1,6 +1,7 @@
 import { createServerClient } from "@supabase/ssr";
 import { createClient } from "@supabase/supabase-js";
 import { extractBearerToken, type AuthFn } from "eve/channels/auth";
+import { verifyEveSessionToken } from "./eve-session-token.js";
 
 function getSupabaseConfig() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -9,7 +10,9 @@ function getSupabaseConfig() {
   return { url, key };
 }
 
-function parseCookieHeader(header: string): Array<{ name: string; value: string }> {
+function parseCookieHeader(
+  header: string
+): Array<{ name: string; value: string }> {
   const cookies: Array<{ name: string; value: string }> = [];
 
   for (const part of header.split(";")) {
@@ -26,10 +29,10 @@ function parseCookieHeader(header: string): Array<{ name: string; value: string 
   return cookies;
 }
 
-function principalFromUser(user: {
-  id: string;
-  email?: string | null;
-}, authenticator: string) {
+function principalFromUser(
+  user: { id: string; email?: string | null },
+  authenticator: string
+) {
   return {
     principalId: user.id,
     principalType: "user" as const,
@@ -38,6 +41,25 @@ function principalFromUser(user: {
     attributes: {
       email: user.email ?? "",
     },
+  };
+}
+
+/** Short-lived token minted by /api/eve-token after Supabase auth. */
+export function studyBuddySessionTokenAuth(): AuthFn<Request> {
+  return async (request) => {
+    const token = extractBearerToken(request.headers.get("authorization"));
+    if (!token) return null;
+
+    const userId = verifyEveSessionToken(token);
+    if (!userId) return null;
+
+    return {
+      principalId: userId,
+      principalType: "user",
+      authenticator: "studybuddy-session-token",
+      subject: userId,
+      attributes: {},
+    };
   };
 }
 

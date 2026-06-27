@@ -99,10 +99,11 @@ export function ChatPanel({
     return () => subscription.unsubscribe();
   }, []);
 
-  const getAccessToken = useCallback(async () => {
-    const supabase = createClient();
-    const { data } = await supabase.auth.getSession();
-    return data.session?.access_token ?? "";
+  const getEveAuthToken = useCallback(async () => {
+    const res = await fetch("/api/eve-token", { credentials: "include" });
+    if (!res.ok) return "";
+    const data = (await res.json()) as { token?: string };
+    return data.token ?? "";
   }, []);
 
   useEffect(() => {
@@ -111,20 +112,9 @@ export function ChatPanel({
     let cancelled = false;
 
     async function checkEveHealth() {
-      const token = await getAccessToken();
-      const headers: HeadersInit = {};
-      if (token) {
-        headers.Authorization = `Bearer ${token}`;
-      }
-
-      try {
-        const res = await fetch("/eve/v1/health", {
-          credentials: "include",
-          headers,
-        });
-        if (!res.ok && !cancelled) setUseFallback(true);
-      } catch {
-        if (!cancelled) setUseFallback(true);
+      const token = await getEveAuthToken();
+      if (!token && !cancelled) {
+        setUseFallback(true);
       }
     }
 
@@ -133,7 +123,7 @@ export function ChatPanel({
     return () => {
       cancelled = true;
     };
-  }, [sessionReady, getAccessToken]);
+  }, [sessionReady, getEveAuthToken]);
 
   const persistMessages = useCallback(
     async (
@@ -167,7 +157,7 @@ export function ChatPanel({
 
   const agent = useEveAgent({
     auth: {
-      bearer: getAccessToken,
+      bearer: getEveAuthToken,
     },
     prepareSend: (payload) => ({
       ...payload,
@@ -384,7 +374,7 @@ export function ChatPanel({
       return;
     }
 
-    const token = await getAccessToken();
+    const token = await getEveAuthToken();
     if (!token) {
       await sendFallback(trimmed);
       return;
@@ -598,7 +588,7 @@ export function ChatPanel({
         </div>
       </form>
 
-      {(error || agent.error) && (
+      {(error || (agent.error && !/authorization/i.test(agent.error.message))) && (
         <p className="px-4 pb-3 text-sm text-red-600">
           {error ?? agent.error?.message}
         </p>

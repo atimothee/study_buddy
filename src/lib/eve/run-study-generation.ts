@@ -20,9 +20,12 @@ const eveResultSchema = z.object({
   quizQuestionCount: z.number(),
 });
 
-async function isEveAvailable(accessToken?: string | null): Promise<boolean> {
+async function isEveAvailable(
+  userId: string,
+  accessToken?: string | null
+): Promise<boolean> {
   try {
-    const client = await createAuthenticatedEveClient(accessToken);
+    const client = await createAuthenticatedEveClient(userId, accessToken);
     const health = await client.health();
     return health.ok === true;
   } catch {
@@ -41,7 +44,7 @@ async function generateViaEveAgent(
     "agent.execution",
     { feature: "study_generation", studySetId, userId },
     async () => {
-      const client = await createAuthenticatedEveClient(accessToken);
+      const client = await createAuthenticatedEveClient(userId, accessToken);
       const session = client.session();
 
       const response = await session.send({
@@ -123,7 +126,7 @@ export async function runStudyGeneration(
   options?: GenerateStudyArtifactsOptions,
   accessToken?: string | null
 ): Promise<SaveStudyArtifactsResult> {
-  if (await isEveAvailable(accessToken)) {
+  if (await isEveAvailable(userId, accessToken)) {
     try {
       return await generateViaEveAgent(
         studySetId,

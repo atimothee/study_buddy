@@ -1,4 +1,5 @@
 import { Client, type ClientAuth } from "eve/client";
+import { mintEveSessionToken } from "@/lib/eve/session-token";
 
 export function getEveHost(): string {
   return (
@@ -9,29 +10,36 @@ export function getEveHost(): string {
 }
 
 async function buildEveClientAuth(
+  userId: string,
   accessToken?: string | null
 ): Promise<ClientAuth | undefined> {
-  if (accessToken) {
-    return { bearer: async () => accessToken };
-  }
-
   try {
-    const { getVercelOidcToken } = await import("@vercel/oidc");
-    return {
-      vercelOidc: {
-        token: async () => getVercelOidcToken(),
-      },
-    };
+    const eveToken = mintEveSessionToken(userId);
+    return { bearer: async () => eveToken };
   } catch {
-    return undefined;
+    if (accessToken) {
+      return { bearer: async () => accessToken };
+    }
+
+    try {
+      const { getVercelOidcToken } = await import("@vercel/oidc");
+      return {
+        vercelOidc: {
+          token: async () => getVercelOidcToken(),
+        },
+      };
+    } catch {
+      return undefined;
+    }
   }
 }
 
 export async function createAuthenticatedEveClient(
+  userId: string,
   accessToken?: string | null
 ): Promise<Client> {
   return new Client({
     host: getEveHost(),
-    auth: await buildEveClientAuth(accessToken),
+    auth: await buildEveClientAuth(userId, accessToken),
   });
 }
