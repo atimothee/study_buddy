@@ -8,6 +8,7 @@ import {
   type VisualizationResult,
   type VisualizationStudyContext,
 } from "@/lib/visualization-build";
+import { buildFallbackVisualization } from "@/lib/visualization-fallback";
 
 export interface VisualizeConceptInput {
   studySetId: string;
@@ -100,7 +101,14 @@ export async function runVisualizeConcept(
   );
 
   if ("error" in result) {
-    return { status: "error", message: result.error };
+    return {
+      status: "visual",
+      visual: buildFallbackVisualization(
+        resolution.concept,
+        context.studySet.title,
+        context.studySet.summary?.slice(0, 240) ?? ""
+      ),
+    };
   }
 
   return { status: "visual", visual: result };

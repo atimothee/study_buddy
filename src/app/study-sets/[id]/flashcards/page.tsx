@@ -4,6 +4,19 @@ import { AppShell } from "@/components/AppShell";
 import { FlashcardViewer } from "@/components/FlashcardViewer";
 import { EmptyState } from "@/components/EmptyState";
 import { GenerateButton } from "@/components/GenerateButton";
+import type { CardType, Flashcard } from "@/lib/types";
+
+function normalizeFlashcard(card: Flashcard): Flashcard {
+  return {
+    ...card,
+    card_type: (card.card_type ?? "basic") as CardType,
+    cloze_text: card.cloze_text ?? null,
+    answer: card.answer ?? null,
+    explanation: card.explanation ?? null,
+    tags: card.tags ?? null,
+    source_quote: card.source_quote ?? null,
+  };
+}
 
 interface PageProps {
   params: Promise<{ id: string }>;
@@ -44,7 +57,9 @@ export default async function FlashcardsPage({ params }: PageProps) {
             />
           </div>
         ) : (
-          <FlashcardViewer cards={flashcards} />
+          <FlashcardViewer
+            cards={(flashcards ?? []).map(normalizeFlashcard)}
+          />
         )}
       </div>
     </AppShell>

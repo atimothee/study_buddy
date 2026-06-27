@@ -3,6 +3,7 @@ import { createClient } from "@/lib/supabase/server";
 import { checkRateLimit } from "@/lib/rate-limit";
 import { visualizeConceptSchema } from "@/lib/validations";
 import { runVisualizeConcept } from "@/lib/visualize-concept";
+import { buildFallbackVisualization } from "@/lib/visualization-fallback";
 import { captureAppError, withAppSpan } from "@/lib/sentry";
 
 export const maxDuration = 60;
@@ -81,8 +82,15 @@ export async function POST(request: Request) {
       tool: "visualizeRoute",
     });
     return NextResponse.json(
-      { type: "error", message: "Failed to create visual explanation" },
-      { status: 500 }
+      {
+        type: "visual",
+        visual: buildFallbackVisualization(
+          "Study concept",
+          "your study set",
+          "Visual explanation fallback."
+        ),
+      },
+      { status: 200 }
     );
   }
 }

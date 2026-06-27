@@ -10,6 +10,7 @@ import {
   XIAOHEI_SKILL_ID,
   type XiaoheiSkillRefs,
 } from "@/lib/xiaohei-skill";
+import { buildFallbackVisualization } from "@/lib/visualization-fallback";
 
 export interface VisualizationResult {
   title: string;
@@ -78,14 +79,12 @@ export async function buildVisualizationResult(
   }
 
   const refs = skillRefs ?? (await loadXiaoheiSkillRefs());
+  const title = concept.trim() || context.studySet.title;
+
   if (!isXiaoheiSkillAvailable(refs)) {
-    return {
-      error:
-        "The ian-xiaohei-illustrations-en skill is not available in this deployment.",
-    };
+    return buildFallbackVisualization(title, context.studySet.title, sourceGrounding);
   }
 
-  const title = concept.trim() || context.studySet.title;
   const illustrationPrompt = buildXiaoheiIllustrationPrompt({
     concept: title,
     studySetTitle: context.studySet.title,

@@ -1,10 +1,13 @@
 "use client";
 
-import { useState } from "react";
-import { useRouter } from "next/navigation";
 import { Sparkles } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
-import { LoadingSpinner } from "@/components/LoadingSpinner";
+import {
+  GenerationProgress,
+  GENERATION_STEPS,
+} from "@/components/GenerationProgress";
 
 interface GenerateButtonProps {
   studySetId: string;
@@ -12,6 +15,8 @@ interface GenerateButtonProps {
   label?: string;
   onGenerated?: () => void;
 }
+
+const STEP_INTERVAL_MS = 2800;
 
 export function GenerateButton({
   studySetId,
@@ -21,13 +26,44 @@ export function GenerateButton({
 }: GenerateButtonProps) {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
+  const [activeStep, setActiveStep] = useState(0);
+  const [complete, setComplete] = useState(false);
   const [success, setSuccess] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const stepTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (stepTimerRef.current) clearInterval(stepTimerRef.current);
+    };
+  }, []);
+
+  function startStepper() {
+    setActiveStep(0);
+    setComplete(false);
+    if (stepTimerRef.current) clearInterval(stepTimerRef.current);
+    stepTimerRef.current = setInterval(() => {
+      setActiveStep((prev) => {
+        if (prev >= GENERATION_STEPS.length - 1) {
+          if (stepTimerRef.current) clearInterval(stepTimerRef.current);
+          return prev;
+        }
+        return prev + 1;
+      });
+    }, STEP_INTERVAL_MS);
+  }
+
+  function stopStepper() {
+    if (stepTimerRef.current) clearInterval(stepTimerRef.current);
+    setComplete(true);
+    setActiveStep(GENERATION_STEPS.length);
+  }
 
   async function handleGenerate() {
     setLoading(true);
     setError(null);
     setSuccess(false);
+    startStepper();
 
     try {
       const res = await fetch("/api/generate", {
@@ -42,18 +78,25 @@ export function GenerateButton({
         throw new Error(data.error ?? "Generation failed");
       }
 
+      stopStepper();
       setSuccess(true);
       onGenerated?.();
       router.refresh();
     } catch (err) {
+      if (stepTimerRef.current) clearInterval(stepTimerRef.current);
       setError(err instanceof Error ? err.message : "Something went wrong");
     } finally {
       setLoading(false);
     }
   }
 
-  if (loading) {
-    return <LoadingSpinner label="Generating your study materials..." />;
+  if (loading || complete) {
+    return (
+      <GenerationProgress
+        activeStep={activeStep}
+        complete={complete && success}
+      />
+    );
   }
 
   return (

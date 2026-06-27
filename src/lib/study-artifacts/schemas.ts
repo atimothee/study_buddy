@@ -2,9 +2,23 @@ import { z } from "zod";
 
 export const MIN_SOURCE_TEXT_LENGTH = 100;
 
+export const cardTypeSchema = z.enum([
+  "basic",
+  "cloze",
+  "definition",
+  "compare_contrast",
+  "application",
+]);
+
 export const flashcardSchema = z.object({
+  card_type: cardTypeSchema.default("basic"),
   front: z.string(),
   back: z.string(),
+  cloze_text: z.string().nullable().optional(),
+  answer: z.string().nullable().optional(),
+  explanation: z.string().nullable().optional(),
+  tags: z.array(z.string()).nullable().optional(),
+  source_quote: z.string().nullable().optional(),
   difficulty: z.enum(["easy", "medium", "hard"]),
 });
 

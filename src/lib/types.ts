@@ -1,5 +1,12 @@
 export type Difficulty = "easy" | "medium" | "hard";
 
+export type CardType =
+  | "basic"
+  | "cloze"
+  | "definition"
+  | "compare_contrast"
+  | "application";
+
 export interface Profile {
   id: string;
   email: string | null;
@@ -22,6 +29,12 @@ export interface Flashcard {
   study_set_id: string;
   front: string;
   back: string;
+  card_type: CardType;
+  cloze_text: string | null;
+  answer: string | null;
+  explanation: string | null;
+  tags: string[] | null;
+  source_quote: string | null;
   difficulty: Difficulty;
   created_at: string;
 }
@@ -53,8 +66,14 @@ export interface ChatMessage {
 }
 
 export interface GeneratedFlashcard {
+  card_type: CardType;
   front: string;
   back: string;
+  cloze_text?: string | null;
+  answer?: string | null;
+  explanation?: string | null;
+  tags?: string[] | null;
+  source_quote?: string | null;
   difficulty: Difficulty;
 }
 

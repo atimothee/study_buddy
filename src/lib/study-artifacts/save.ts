@@ -1,6 +1,40 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { StudyArtifacts } from "@/lib/study-artifacts/schemas";
+import type { CardType } from "@/lib/types";
 import { captureAppError, withAppSpan } from "@/lib/sentry";
+
+function normalizeFlashcardForSave(card: StudyArtifacts["flashcards"][number]) {
+  let cardType = (card.card_type ?? "basic") as CardType;
+  let clozeText = card.cloze_text ?? null;
+
+  if (
+    cardType === "cloze" &&
+    (!clozeText || !clozeText.includes("{{") || !clozeText.includes("}}"))
+  ) {
+    if (card.answer && card.front.includes("____")) {
+      clozeText = card.front.replace("_____", `{{${card.answer}}}`);
+    } else if (card.answer) {
+      clozeText = card.back.includes(card.answer)
+        ? card.back.replace(card.answer, `{{${card.answer}}}`)
+        : `{{${card.answer}}}`;
+    } else {
+      cardType = "basic";
+      clozeText = null;
+    }
+  }
+
+  return {
+    card_type: cardType,
+    front: card.front,
+    back: card.back,
+    cloze_text: clozeText,
+    answer: card.answer ?? null,
+    explanation: card.explanation ?? null,
+    tags: card.tags ?? null,
+    source_quote: card.source_quote ?? null,
+    difficulty: card.difficulty,
+  };
+}
 
 export interface SaveStudyArtifactsResult {
   success: true;
@@ -70,9 +104,7 @@ export async function saveStudyArtifactsToDb(
               supabase.from("flashcards").insert(
                 artifacts.flashcards.map((card) => ({
                   study_set_id: studySetId,
-                  front: card.front,
-                  back: card.back,
-                  difficulty: card.difficulty,
+                  ...normalizeFlashcardForSave(card),
                 }))
               )
           );
