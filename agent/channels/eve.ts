@@ -8,7 +8,7 @@ import { supabaseBearerAuth } from "../lib/supabase-auth.js";
 
 import {
   extractConceptFromMessage,
-  hasVisualIntent,
+  isVisualizationRequest,
 } from "../../src/lib/concept-grounding.js";
 
 function studyBuddyOnMessage(ctx: EveMessageContext, message: string | unknown) {
@@ -17,20 +17,20 @@ function studyBuddyOnMessage(ctx: EveMessageContext, message: string | unknown) 
       ? message
       : JSON.stringify(message).slice(0, 500);
 
-  const visualRequest = hasVisualIntent(text);
+  const visualRequest = isVisualizationRequest(text);
   const concept = extractConceptFromMessage(text);
 
   const contextLines = [
     "StudyBuddy session. Client context on this turn includes studySetId and userId when provided by the web app.",
     "Always call getStudySetContext first when you need material context.",
-    "When asked what you can help with, mention visual explanations for difficult concepts.",
+    "When asked what you can help with, mention that you can answer questions, quiz the user, generate practice questions, and visualize concepts with the ian-xiaohei-illustrations-en skill.",
     "Persist user and assistant messages with saveChatMessage using the same studySetId and userId.",
     `Latest user message preview: ${text.slice(0, 280)}`,
   ];
 
   if (visualRequest) {
     contextLines.push(
-      `VISUAL REQUEST DETECTED. You MUST call visualizeConcept immediately with studySetId and userId from clientContext and concept="${concept}". Do not say you cannot visualize. Do not answer from memory before calling the tool.`
+      `VISUAL REQUEST DETECTED. You MUST call visualizeConcept immediately with studySetId and userId from clientContext and concept="${concept}". visualizeConcept uses the ian-xiaohei-illustrations-en skill. Do not say you cannot visualize. Do not answer from memory before calling the tool.`
     );
   } else {
     contextLines.push(

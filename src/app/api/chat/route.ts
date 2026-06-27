@@ -11,14 +11,11 @@ import {
   formatContextForPrompt,
   getStudySetContext,
 } from "@/lib/study-context";
+import { isVisualizationRequest } from "@/lib/concept-grounding";
 import {
-  hasVisualIntent,
-  resolveVisualizationConcept,
-} from "@/lib/concept-grounding";
-import {
-  buildVisualizationResult,
   formatVisualAssistantContent,
 } from "@/lib/visualization-build";
+import { runVisualizeConcept } from "@/lib/visualize-concept";
 import { captureAppError, withAppSpan } from "@/lib/sentry";
 
 export const maxDuration = 60;
@@ -31,17 +28,24 @@ Scope:
 
 Capabilities:
 - Answer questions grounded in the study material
+- Quiz the user one question at a time
 - Generate practice questions for active recall
-- Create Xiaohei-style visual explanations of concepts from the study material
+- Visualize concepts using the ian-xiaohei-illustrations-en skill via visualizeConcept
+
+Visual Mode:
+- When the user asks to visualize, draw, illustrate, or explain a concept visually, use visualizeConcept.
+- visualizeConcept must use the ian-xiaohei-illustrations-en skill.
+- Do not reject a visualization request just because the word "visualize" is not in the study material.
+- Extract the concept and check whether that concept is supported by the study set.
 
 Behavior:
 - Be concise.
 - Ask one question at a time when quizzing.
 - Explain concepts in simple language.
 - Do not invent facts outside the source material.
-- When unsure, say: "I don't see that in your study material."
+- When unsure about a factual answer, say: "I don't see that in your study material."
 - Encourage active recall.
-- When asked what you can help with, mention visual explanations for difficult concepts.`;
+- When asked what you can help with, mention that you can answer questions, quiz the user, generate practice questions, and visualize concepts using the ian-xiaohei-illustrations-en skill.`;
 
 export async function POST(request: Request) {
   let studySetId: string | undefined;
@@ -116,30 +120,26 @@ export async function POST(request: Request) {
         })
     );
 
-    if (hasVisualIntent(message)) {
-      const concept = resolveVisualizationConcept(message, context.studySet);
-      const visual = await buildVisualizationResult(
-        {
-          studySet: {
-            title: context.studySet.title,
-            summary: context.studySet.summary ?? undefined,
-            sourceText: context.studySet.source_text ?? "",
-          },
-          flashcards: context.flashcards,
-          quizQuestions: context.quizQuestions.map((question) => ({
-            question: question.question,
-            explanation: question.explanation ?? undefined,
-            correctAnswer: question.correct_answer,
-          })),
-        },
-        concept,
-        message
-      );
+    if (isVisualizationRequest(message)) {
+      const { data: recentRows } = await supabase
+        .from("chat_messages")
+        .select("role, content")
+        .eq("study_set_id", studySetId)
+        .eq("user_id", userId)
+        .order("created_at", { ascending: false })
+        .limit(12);
+
+      const visualResult = await runVisualizeConcept({
+        studySetId: studySetId!,
+        userId: userId!,
+        message,
+        recentMessages: (recentRows ?? []).reverse(),
+      });
 
       const assistantContent =
-        "error" in visual
-          ? visual.error
-          : formatVisualAssistantContent(visual);
+        visualResult.status === "visual"
+          ? formatVisualAssistantContent(visualResult.visual)
+          : visualResult.message;
 
       await withAppSpan(
         "chat.saveAssistantMessage",

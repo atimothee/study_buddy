@@ -1,10 +1,12 @@
 export interface VisualizationPayload {
   title: string;
+  concept?: string;
   shortExplanation: string;
   illustrationPrompt: string;
   illustrationOutput?: string;
   illustrationFormat?: "image" | "svg" | "markdown" | "html" | "prompt";
   sourceGrounding: string;
+  skillId?: string;
 }
 
 export function isVisualizationPayload(

@@ -1,3 +1,5 @@
+import { stripVisualizationMarker } from "@/lib/visualization";
+
 const STOP_WORDS = new Set([
   "a",
   "an",
@@ -48,16 +50,29 @@ const STOP_WORDS = new Set([
   "how",
   "what",
   "about",
+  "cartoon",
+  "visually",
 ]);
 
+export const VISUAL_CLARIFY_MESSAGE =
+  "Yes. What concept from this study set should I visualize?";
+
 const VAGUE_VISUAL_PATTERN =
-  /^(can you )?(please )?(visuali[sz]e|draw|illustrat|sketch|diagram)( (something|it|this|a concept|for me))?[?.!]*$/i;
+  /^(can you )?(please )?(visuali[sz]e|draw|illustrat|sketch|diagram|show(\s+me)?\s+visually)( (it|this|something|a concept|for me))?[?.!]*$/i;
 
-const VISUAL_INTENT_PATTERN =
-  /\b(visuali[sz]e|visuali[sz]ation|draw|illustrat|sketch|diagram|xiaohei|explain\s+.*\s+visually|visual\s+explanation|make\s+(a\s+)?visual|create\s+(a\s+)?visual)\b/i;
+export function isVisualizationRequest(message: string): boolean {
+  return (
+    /\b(visualize|draw|illustrate|sketch|diagram|xiaohei|cartoon|visual explanation|show visually)\b/i.test(
+      message
+    ) ||
+    /\bshow\s+me\s+visually\b/i.test(message) ||
+    VAGUE_VISUAL_PATTERN.test(message.trim())
+  );
+}
 
+/** @deprecated Use isVisualizationRequest */
 export function hasVisualIntent(message: string): boolean {
-  return VISUAL_INTENT_PATTERN.test(message) || VAGUE_VISUAL_PATTERN.test(message.trim());
+  return isVisualizationRequest(message) || VAGUE_VISUAL_PATTERN.test(message.trim());
 }
 
 export function isVagueVisualRequest(message: string): boolean {
@@ -68,36 +83,19 @@ export function isVagueVisualRequest(message: string): boolean {
   );
 }
 
-export function resolveVisualizationConcept(
-  message: string,
-  studySet: { title: string; summary?: string | null }
-): string {
-  const extracted = extractConceptFromMessage(message);
-  if (!isVagueVisualRequest(message) && extractSearchTerms(extracted).length > 0) {
-    return extracted;
-  }
-
-  if (studySet.summary?.trim()) {
-    const firstSentence = studySet.summary.split(/[.!?]/)[0]?.trim();
-    if (firstSentence && firstSentence.length > 10) {
-      return firstSentence.slice(0, 120);
-    }
-  }
-
-  return studySet.title;
-}
-
 export function extractConceptFromMessage(message: string): string {
   let concept = message.trim();
 
   const stripPatterns = [
     /^please\s+/i,
-    /\b(visuali[sz]e|draw|illustrat|sketch|diagram|show)\s+(me\s+)?/gi,
-    /\b(create|make)\s+(a\s+)?(visual|illustration|diagram|xiaohei[- ]style\s+visual\s+explanation)\s+(of|for)\s+/gi,
+    /\b(visuali[sz]e|draw|illustrat|sketch|diagram|show(\s+me)?\s+visually)\s+(me\s+)?/gi,
+    /\b(create|make)\s+(a\s+)?(visual|illustration|diagram|xiaohei[- ]style\s+(explanation|illustration|visual))\s+(of|for)\s+/gi,
+    /\b(make|create)\s+(a\s+)?xiaohei[- ]style\s+(explanation|illustration|visual)\s+of\s+/gi,
     /\busing\s+the\s+xiaohei\s+illustration\s+style:?\s*/gi,
-    /\bfrom\s+my\s+study\s+set\b/gi,
+    /\bfrom\s+my\s+study\s+(set|material)\b/gi,
     /\bthis\s+concept\s+from\s+my\s+study\s+set\b/gi,
     /\bplease\s+visualize\s+this\s+concept\b/gi,
+    /\bexplain\s+.*\s+visually\s+/gi,
   ];
 
   for (const pattern of stripPatterns) {
@@ -105,7 +103,69 @@ export function extractConceptFromMessage(message: string): string {
   }
 
   concept = concept.replace(/\s+/g, " ").trim();
-  return concept || message.trim();
+  return concept;
+}
+
+export interface ConceptResolution {
+  concept: string | null;
+  needsClarification: boolean;
+}
+
+export function resolveVisualizationConcept(
+  message: string,
+  recentMessages: Array<{ role: string; content: string }> = []
+): ConceptResolution {
+  const extracted = extractConceptFromMessage(message);
+
+  if (!isVagueVisualRequest(message) && extractSearchTerms(extracted).length > 0) {
+    return { concept: extracted, needsClarification: false };
+  }
+
+  const fromHistory = inferConceptFromRecentMessages(recentMessages);
+  if (fromHistory) {
+    return { concept: fromHistory, needsClarification: false };
+  }
+
+  return { concept: null, needsClarification: true };
+}
+
+function inferConceptFromRecentMessages(
+  recentMessages: Array<{ role: string; content: string }>
+): string | null {
+  for (const message of [...recentMessages].reverse()) {
+    if (message.role !== "user" && message.role !== "assistant") continue;
+
+    const text = stripVisualizationMarker(message.content).trim();
+    if (!text || isVisualizationRequest(text) || isVagueVisualRequest(text)) {
+      continue;
+    }
+
+    const phrase = extractLikelyConceptPhrase(text);
+    if (phrase) return phrase;
+  }
+
+  return null;
+}
+
+function extractLikelyConceptPhrase(text: string): string | null {
+  const patterns = [
+    /\b(self-attention|multi-head attention|positional encoding|attention mechanism|transformer architecture|encoder-decoder|feed-forward network|layer normalization)\b/i,
+    /\b([A-Za-z][\w-]*(?:\s+[A-Za-z][\w-]*){0,4})\b/,
+  ];
+
+  for (const pattern of patterns) {
+    const match = text.match(pattern);
+    if (match?.[1] && extractSearchTerms(match[1]).length > 0) {
+      return match[1].trim();
+    }
+  }
+
+  const terms = extractSearchTerms(text);
+  if (terms.length >= 2) {
+    return terms.slice(0, 4).join(" ");
+  }
+
+  return terms[0] ?? null;
 }
 
 function normalizeText(text: string): string {
@@ -235,33 +295,7 @@ export function isConceptGrounded(
 ): boolean {
   const haystack = sources.join("\n");
   if (!haystack.trim()) return false;
-
-  const { matched, terms } = scoreConceptMatch(haystack, concept);
-  if (matched) return true;
-
-  // Allow study-set-level concepts when material exists.
-  if (terms.length === 0 && haystack.trim().length > 50) {
-    return true;
-  }
-
-  return false;
-}
-
-export function conceptAlignsWithStudySet(
-  concept: string,
-  studySetTitle: string
-): boolean {
-  const conceptTerms = extractSearchTerms(concept);
-  const titleTerms = extractSearchTerms(studySetTitle);
-  if (conceptTerms.length === 0 || titleTerms.length === 0) return false;
-
-  return conceptTerms.some((conceptTerm) =>
-    titleTerms.some(
-      (titleTerm) =>
-        termMatchesHaystack(titleTerm, conceptTerm) ||
-        termMatchesHaystack(conceptTerm, titleTerm)
-    )
-  );
+  return scoreConceptMatch(haystack, concept).matched;
 }
 
 export function defaultGroundingFromSources(sources: string[]): string {

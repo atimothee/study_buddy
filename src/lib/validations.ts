@@ -21,6 +21,16 @@ export const visualizeConceptSchema = z.object({
   studySetId: z.string().uuid(),
   concept: z.string().min(1).max(500),
   userInstruction: z.string().max(4000).optional(),
+  conceptOverride: z.string().max(500).optional(),
+  recentMessages: z
+    .array(
+      z.object({
+        role: z.enum(["user", "assistant", "system"]),
+        content: z.string(),
+      })
+    )
+    .max(20)
+    .optional(),
 });
 
 export const loginSchema = z.object({

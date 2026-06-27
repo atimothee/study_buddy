@@ -18,8 +18,9 @@ import {
 } from "@/lib/visualization";
 import {
   extractConceptFromMessage,
-  hasVisualIntent,
+  isVisualizationRequest,
 } from "@/lib/concept-grounding";
+import { getChatPromptChips } from "@/lib/chat-prompts";
 import type { ChatMessage } from "@/lib/types";
 
 interface ChatPanelProps {
@@ -75,6 +76,12 @@ export function ChatPanel({
   const [accessToken, setAccessToken] = useState<string | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const lastPersistedRef = useRef<string>("");
+  const tempIdRef = useRef(0);
+
+  function nextTempId(prefix: string) {
+    tempIdRef.current += 1;
+    return `${prefix}-${tempIdRef.current}`;
+  }
 
   useEffect(() => {
     const supabase = createClient();
@@ -139,7 +146,7 @@ export function ChatPanel({
         studySetTitle,
         visualRequest:
           typeof payload.message === "string" &&
-          hasVisualIntent(payload.message),
+          isVisualizationRequest(payload.message),
       },
     }),
     onError: (err) => {
@@ -185,7 +192,7 @@ export function ChatPanel({
       setVisualLoading(true);
       setError(null);
 
-      const optimisticId = `temp-user-${Date.now()}`;
+      const optimisticId = nextTempId("temp-user");
       const optimisticUser: ChatMessage = {
         id: optimisticId,
         study_set_id: studySetId,
@@ -196,6 +203,26 @@ export function ChatPanel({
       };
       setHistory((prev) => [...prev, optimisticUser]);
 
+      const recentMessages = history.slice(-12).map((entry) => ({
+        role: entry.role,
+        content: entry.content,
+      }));
+
+      const deliverAssistantText = async (assistantContent: string) => {
+        setHistory((prev) => prev.filter((m) => m.id !== optimisticId));
+        await persistMessages([
+          { role: "user", content: message },
+          { role: "assistant", content: assistantContent },
+        ]);
+      };
+
+      const deliverVisual = async (visual: VisualizationPayload) => {
+        const assistantText = `Here's a Xiaohei visual explanation of "${visual.concept ?? visual.title}" based on your study material.`;
+        await deliverAssistantText(
+          serializeAssistantForPersist(assistantText, [visual])
+        );
+      };
+
       try {
         const res = await fetch("/api/visualize", {
           method: "POST",
@@ -204,52 +231,36 @@ export function ChatPanel({
             studySetId,
             concept,
             userInstruction: message,
+            conceptOverride: conceptSeed?.trim() || undefined,
+            recentMessages,
           }),
         });
 
         const data = await res.json();
-        if (!res.ok) {
-          throw new Error(data.error ?? "Failed to create visual explanation");
+
+        if (data.type === "visual" && data.visual) {
+          await deliverVisual(data.visual as VisualizationPayload);
+          return;
         }
 
-        const visual = data.visual as VisualizationPayload;
-        const assistantText = `Here's a visual explanation of "${visual.title}" based on your study material.`;
-        const assistantContent = serializeAssistantForPersist(assistantText, [
-          visual,
-        ]);
+        if (data.type === "clarify" && data.message) {
+          await deliverAssistantText(data.message as string);
+          return;
+        }
 
-        setHistory((prev) => prev.filter((m) => m.id !== optimisticId));
-
-        await persistMessages([
-          { role: "user", content: message },
-          { role: "assistant", content: assistantContent },
-        ]);
-      } catch (err) {
         const errorText =
-          err instanceof Error
-            ? err.message
-            : "Failed to create visual explanation";
-        setHistory((prev) => [
-          ...prev.filter((m) => m.id !== optimisticId),
-          optimisticUser,
-          {
-            id: `temp-assistant-${Date.now()}`,
-            study_set_id: studySetId,
-            user_id: userId,
-            role: "assistant",
-            content: errorText,
-            created_at: new Date().toISOString(),
-          },
-        ]);
-        await persistMessages([
-          { role: "user", content: message },
-          { role: "assistant", content: errorText },
-        ]);
+          (typeof data.message === "string" && data.message) ||
+          (typeof data.error === "string" && data.error) ||
+          "I don't see that in your study material.";
+        await deliverAssistantText(errorText);
+      } catch {
+        setHistory((prev) => prev.filter((m) => m.id !== optimisticId));
+        setError("Could not create visual explanation. Chat is still available.");
       } finally {
         setVisualLoading(false);
       }
     },
-    [persistMessages, studySetId, userId]
+    [history, persistMessages, studySetId, userId]
   );
 
   useEffect(() => {
@@ -261,7 +272,7 @@ export function ChatPanel({
     setError(null);
 
     const optimisticUser: ChatMessage = {
-      id: `temp-user-${Date.now()}`,
+      id: nextTempId("temp-user"),
       study_set_id: studySetId,
       user_id: userId,
       role: "user",
@@ -284,9 +295,9 @@ export function ChatPanel({
 
       const reader = res.body?.getReader();
       const decoder = new TextDecoder();
-      let assistantText = "";
+      const textChunks: string[] = [];
 
-      const assistantId = `temp-assistant-${Date.now()}`;
+      const assistantId = nextTempId("temp-assistant");
       setHistory((prev) => [
         ...prev,
         {
@@ -303,7 +314,8 @@ export function ChatPanel({
         while (true) {
           const { done, value } = await reader.read();
           if (done) break;
-          assistantText += decoder.decode(value, { stream: true });
+          textChunks.push(decoder.decode(value, { stream: true }));
+          const assistantText = textChunks.join("");
           setHistory((prev) =>
             prev.map((m) =>
               m.id === assistantId ? { ...m, content: assistantText } : m
@@ -319,31 +331,35 @@ export function ChatPanel({
     }
   }
 
-  async function handleSend(e: React.FormEvent) {
-    e.preventDefault();
-    const message = input.trim();
-    if (!message || isBusy) return;
+  async function sendMessage(message: string) {
+    const trimmed = message.trim();
+    if (!trimmed || isBusy) return;
 
     setInput("");
     setError(null);
 
-    if (hasVisualIntent(message)) {
-      await requestVisualization(message);
+    if (isVisualizationRequest(trimmed)) {
+      await requestVisualization(trimmed);
       return;
     }
 
     if (useFallback || !accessToken) {
-      await sendFallback(message);
+      await sendFallback(trimmed);
       return;
     }
 
     try {
-      await agent.send({ message });
+      await agent.send({ message: trimmed });
     } catch (err) {
       setError(err instanceof Error ? err.message : "Eve agent unavailable");
       setUseFallback(true);
-      await sendFallback(message);
+      await sendFallback(trimmed);
     }
+  }
+
+  async function handleSend(e: React.FormEvent) {
+    e.preventDefault();
+    await sendMessage(input);
   }
 
   function queueVisualRequest(seed?: string) {
@@ -352,10 +368,13 @@ export function ChatPanel({
     void requestVisualization(message, concept);
   }
 
-  const liveMessages = useMemo(() => {
-    if (useFallback) return [];
-    return agent.data.messages;
-  }, [agent.data.messages, useFallback]);
+  const promptChips = useMemo(
+    () => getChatPromptChips(studySetTitle),
+    [studySetTitle]
+  );
+  const isDemoSet = promptChips.some((chip) => chip.highlight);
+
+  const liveMessages = useFallback ? [] : [...agent.data.messages];
 
   const renderedHistory = history.map((message) => {
     const visuals = parseStoredVisualizations(message.content);
@@ -442,12 +461,19 @@ export function ChatPanel({
 
       <div className="flex-1 space-y-4 overflow-y-auto p-4">
         {history.length === 0 && liveMessages.length === 0 && !isBusy && (
-          <div className="flex h-full flex-col items-center justify-center text-center text-slate-500">
-            <p className="font-medium text-slate-700">Chat with StudyBuddy</p>
-            <p className="mt-1 max-w-sm text-sm">
-              Ask about your study material, request practice questions, or create
-              visual explanations for difficult concepts.
-            </p>
+          <div className="flex h-full flex-col items-center justify-center gap-4 text-center text-slate-500">
+            <div>
+              <p className="font-medium text-slate-700">Chat with StudyBuddy</p>
+              <p className="mt-1 max-w-sm text-sm">
+                Ask questions, request practice questions, get quizzed, or ask
+                StudyBuddy to visualize a concept.
+              </p>
+            </div>
+            {isDemoSet && (
+              <p className="max-w-md text-xs text-indigo-600">
+                Try the suggested prompts below to explore this study set.
+              </p>
+            )}
           </div>
         )}
 
@@ -458,7 +484,7 @@ export function ChatPanel({
           <LoadingSpinner
             label={
               visualLoading
-                ? "Creating visual explanation..."
+                ? "Creating Xiaohei visual explanation..."
                 : "StudyBuddy is thinking..."
             }
           />
@@ -469,8 +495,36 @@ export function ChatPanel({
 
       <form
         onSubmit={handleSend}
-        className="space-y-2 border-t border-slate-200 p-4"
+        className="space-y-3 border-t border-slate-200 p-4"
       >
+        <div
+          className={cn(
+            "flex flex-wrap gap-2",
+            isDemoSet && "rounded-lg border border-indigo-100 bg-indigo-50/50 p-3"
+          )}
+        >
+          {isDemoSet && (
+            <p className="w-full text-xs font-medium text-indigo-700">
+              Suggested prompts
+            </p>
+          )}
+          {promptChips.map((chip) => (
+            <Button
+              key={chip.label}
+              type="button"
+              variant={chip.highlight ? "default" : "outline"}
+              size="sm"
+              disabled={isBusy}
+              className={cn(
+                "text-xs",
+                chip.highlight && "shadow-sm"
+              )}
+              onClick={() => void sendMessage(chip.message)}
+            >
+              {chip.label}
+            </Button>
+          ))}
+        </div>
         <div className="flex gap-2">
           <Textarea
             value={input}

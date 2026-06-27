@@ -1,25 +1,25 @@
-import { readFile } from "node:fs/promises";
-import { join } from "node:path";
 import {
-  conceptAlignsWithStudySet,
-  defaultGroundingFromSources,
   findBestGroundingSnippet,
   isConceptGrounded,
-  isVagueVisualRequest,
+  defaultGroundingFromSources,
 } from "@/lib/concept-grounding";
-
-const SKILL_ROOT = join(
-  process.cwd(),
-  "agent/skills/ian-xiaohei-illustrations-en"
-);
+import {
+  buildXiaoheiIllustrationPrompt,
+  isXiaoheiSkillAvailable,
+  loadXiaoheiSkillRefs,
+  XIAOHEI_SKILL_ID,
+  type XiaoheiSkillRefs,
+} from "@/lib/xiaohei-skill";
 
 export interface VisualizationResult {
   title: string;
+  concept: string;
   shortExplanation: string;
   illustrationPrompt: string;
   illustrationOutput?: string;
-  illustrationFormat?: "image" | "svg" | "markdown" | "html" | "prompt";
+  illustrationFormat: "image" | "svg" | "markdown" | "html" | "prompt";
   sourceGrounding: string;
+  skillId: string;
 }
 
 export interface VisualizationStudyContext {
@@ -34,14 +34,6 @@ export interface VisualizationStudyContext {
     explanation?: string;
     correctAnswer: string;
   }>;
-}
-
-async function readSkillReference(name: string): Promise<string> {
-  try {
-    return await readFile(join(SKILL_ROOT, "references", name), "utf8");
-  } catch {
-    return "";
-  }
 }
 
 function contextSources(context: VisualizationStudyContext): string[] {
@@ -60,7 +52,8 @@ export async function buildVisualizationResult(
   context: VisualizationStudyContext,
   concept: string,
   userInstruction?: string,
-  grounding?: string
+  grounding?: string,
+  skillRefs?: XiaoheiSkillRefs
 ): Promise<VisualizationResult | { error: string }> {
   const sources = contextSources(context);
   const haystack = sources.join("\n");
@@ -72,72 +65,51 @@ export async function buildVisualizationResult(
   let sourceGrounding =
     grounding?.trim() || findBestGroundingSnippet(sources, concept);
 
-  const grounded = isConceptGrounded(sources, concept);
-  const studySetLevel =
-    isVagueVisualRequest(userInstruction ?? concept) ||
-    conceptAlignsWithStudySet(concept, context.studySet.title);
-
-  if (!grounded && !studySetLevel) {
+  if (!isConceptGrounded(sources, concept)) {
     return { error: "I don't see that in your study material." };
   }
 
   if (!sourceGrounding) {
-    sourceGrounding =
-      findBestGroundingSnippet(sources, context.studySet.title) ||
-      defaultGroundingFromSources(sources);
+    sourceGrounding = defaultGroundingFromSources(sources);
   }
 
   if (!sourceGrounding) {
     return { error: "I don't see that in your study material." };
   }
 
-  const promptTemplate = await readSkillReference("prompt-template.md");
-  const styleDna = await readSkillReference("style-dna.md");
-  const xiaoheiIp = await readSkillReference("xiaohei-ip.md");
+  const refs = skillRefs ?? (await loadXiaoheiSkillRefs());
+  if (!isXiaoheiSkillAvailable(refs)) {
+    return {
+      error:
+        "The ian-xiaohei-illustrations-en skill is not available in this deployment.",
+    };
+  }
 
   const title = concept.trim() || context.studySet.title;
-  const shortExplanation = `A Xiaohei-style visual explanation of "${title}" grounded in your study set "${context.studySet.title}".`;
-
-  const illustrationPrompt = [
-    "16:9 horizontal English study illustration",
-    "pure white background",
-    "black hand-drawn line art",
-    "sparse red/orange/blue handwritten English annotations",
-    "lots of empty white space",
-    "Xiaohei as the core action subject",
-    "no PPT look, no commercial illustration, no childish cuteness",
-    "",
-    `Concept: ${title}`,
-    `Study set: ${context.studySet.title}`,
-    userInstruction ? `User instruction: ${userInstruction}` : "",
-    "",
-    "Grounding from study material:",
+  const illustrationPrompt = buildXiaoheiIllustrationPrompt({
+    concept: title,
+    studySetTitle: context.studySet.title,
     sourceGrounding,
-    "",
-    "Style DNA (from ian-xiaohei-illustrations-en skill):",
-    styleDna.slice(0, 1200),
-    "",
-    "Xiaohei IP:",
-    xiaoheiIp.slice(0, 800),
-    "",
-    "Prompt template guidance:",
-    promptTemplate.slice(0, 1200),
-  ]
-    .filter(Boolean)
-    .join("\n");
+    userInstruction,
+    refs,
+  });
+
+  const shortExplanation = `A Xiaohei-style visual explanation of "${title}" from your study set "${context.studySet.title}", generated with the ${XIAOHEI_SKILL_ID} skill.`;
 
   return {
     title,
+    concept: title,
     shortExplanation,
     illustrationPrompt,
     illustrationFormat: "prompt",
     sourceGrounding,
+    skillId: XIAOHEI_SKILL_ID,
   };
 }
 
 export function formatVisualAssistantContent(
   visual: VisualizationResult
 ): string {
-  const assistantText = `Here's a visual explanation of "${visual.title}" based on your study material.`;
+  const assistantText = `Here's a Xiaohei visual explanation of "${visual.concept}" based on your study material.`;
   return `${assistantText}\n\n---visualization---\n${JSON.stringify(visual)}`;
 }

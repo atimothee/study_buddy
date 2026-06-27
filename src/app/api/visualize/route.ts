@@ -2,11 +2,7 @@ import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { checkRateLimit } from "@/lib/rate-limit";
 import { visualizeConceptSchema } from "@/lib/validations";
-import {
-  extractConceptFromMessage,
-  resolveVisualizationConcept,
-} from "@/lib/concept-grounding";
-import { buildVisualizationResult } from "@/lib/visualization-build";
+import { runVisualizeConcept } from "@/lib/visualize-concept";
 import { captureAppError, withAppSpan } from "@/lib/sentry";
 
 export const maxDuration = 60;
@@ -50,85 +46,33 @@ export async function POST(request: Request) {
     }
 
     studySetId = parsed.data.studySetId;
-    const userInstruction = parsed.data.userInstruction;
-
-    const { data: studySet, error: fetchError } = await withAppSpan(
-      "visualize.fetchStudySet",
-      "db.query",
-      { feature: "visualization", studySetId, userId },
-      () =>
-        supabase
-          .from("study_sets")
-          .select("id, title, summary, source_text")
-          .eq("id", studySetId!)
-          .eq("user_id", userId!)
-          .single()
-    );
-
-    if (fetchError || !studySet) {
-      return NextResponse.json({ error: "Study set not found" }, { status: 404 });
-    }
-
-    const concept = resolveVisualizationConcept(
-      parsed.data.userInstruction ?? parsed.data.concept,
-      studySet
-    );
-
-    const { data: flashcards } = await supabase
-      .from("flashcards")
-      .select("front, back")
-      .eq("study_set_id", studySetId);
-
-    const { data: quizzes } = await supabase
-      .from("quizzes")
-      .select("id")
-      .eq("study_set_id", studySetId)
-      .limit(1);
-
-    let quizQuestions: Array<{
-      question: string;
-      explanation?: string;
-      correctAnswer: string;
-    }> = [];
-
-    if (quizzes?.[0]) {
-      const { data: questions } = await supabase
-        .from("quiz_questions")
-        .select("question, explanation, correct_answer")
-        .eq("quiz_id", quizzes[0].id);
-
-      quizQuestions = (questions ?? []).map((question) => ({
-        question: question.question,
-        explanation: question.explanation ?? undefined,
-        correctAnswer: question.correct_answer,
-      }));
-    }
 
     const result = await withAppSpan(
-      "visualize.build",
+      "visualize.runVisualizeConcept",
       "visualization.generation",
-      { feature: "visualization", studySetId, userId, conceptLength: concept.length },
+      { feature: "visualization", studySetId, userId },
       () =>
-        buildVisualizationResult(
-          {
-            studySet: {
-              title: studySet.title,
-              summary: studySet.summary ?? undefined,
-              sourceText: studySet.source_text ?? "",
-            },
-            flashcards: flashcards ?? [],
-            quizQuestions,
-          },
-          concept,
-          userInstruction
-        )
+        runVisualizeConcept({
+          studySetId: parsed.data.studySetId,
+          userId: user.id,
+          message: parsed.data.userInstruction ?? parsed.data.concept,
+          conceptOverride: parsed.data.conceptOverride,
+          recentMessages: parsed.data.recentMessages,
+        })
     );
 
-    if ("error" in result) {
-      return NextResponse.json({ error: result.error }, { status: 404 });
+    if (result.status === "visual") {
+      return NextResponse.json({ type: "visual", visual: result.visual });
     }
 
-    return NextResponse.json({ visual: result });
+    if (result.status === "clarify") {
+      return NextResponse.json({ type: "clarify", message: result.message });
+    }
+
+    return NextResponse.json(
+      { type: "error", message: result.message },
+      { status: 404 }
+    );
   } catch (error) {
     captureAppError(error, {
       feature: "visualization",
@@ -137,7 +81,7 @@ export async function POST(request: Request) {
       tool: "visualizeRoute",
     });
     return NextResponse.json(
-      { error: "Failed to create visual explanation" },
+      { type: "error", message: "Failed to create visual explanation" },
       { status: 500 }
     );
   }
