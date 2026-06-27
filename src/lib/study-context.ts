@@ -1,5 +1,6 @@
 import { createClient } from "@/lib/supabase/server";
 import type { Flashcard, QuizQuestion, StudySet } from "@/lib/types";
+import { captureAppError, withAppSpan } from "@/lib/sentry";
 
 export interface StudySetContext {
   studySet: Pick<StudySet, "id" | "title" | "subject" | "source_text" | "summary">;
@@ -14,47 +15,64 @@ export async function getStudySetContext(
   studySetId: string,
   userId: string
 ): Promise<StudySetContext | null> {
-  const supabase = await createClient();
+  try {
+    return await withAppSpan(
+      "getStudySetContext",
+      "db.query",
+      { feature: "chat", studySetId, userId },
+      async () => {
+        const supabase = await createClient();
 
-  const { data: studySet } = await supabase
-    .from("study_sets")
-    .select("id, title, subject, source_text, summary")
-    .eq("id", studySetId)
-    .eq("user_id", userId)
-    .single();
+        const { data: studySet } = await supabase
+          .from("study_sets")
+          .select("id, title, subject, source_text, summary")
+          .eq("id", studySetId)
+          .eq("user_id", userId)
+          .single();
 
-  if (!studySet) return null;
+        if (!studySet) return null;
 
-  const { data: flashcards } = await supabase
-    .from("flashcards")
-    .select("front, back, difficulty")
-    .eq("study_set_id", studySetId);
+        const { data: flashcards } = await supabase
+          .from("flashcards")
+          .select("front, back, difficulty")
+          .eq("study_set_id", studySetId);
 
-  const { data: quizzes } = await supabase
-    .from("quizzes")
-    .select("id")
-    .eq("study_set_id", studySetId)
-    .limit(1);
+        const { data: quizzes } = await supabase
+          .from("quizzes")
+          .select("id")
+          .eq("study_set_id", studySetId)
+          .limit(1);
 
-  let quizQuestions: StudySetContext["quizQuestions"] = [];
+        let quizQuestions: StudySetContext["quizQuestions"] = [];
 
-  if (quizzes?.[0]) {
-    const { data: questions } = await supabase
-      .from("quiz_questions")
-      .select("question, choices, correct_answer, explanation")
-      .eq("quiz_id", quizzes[0].id);
+        if (quizzes?.[0]) {
+          const { data: questions } = await supabase
+            .from("quiz_questions")
+            .select("question, choices, correct_answer, explanation")
+            .eq("quiz_id", quizzes[0].id);
 
-    quizQuestions = (questions ?? []).map((q) => ({
-      ...q,
-      choices: q.choices as string[],
-    }));
+          quizQuestions = (questions ?? []).map((q) => ({
+            ...q,
+            choices: q.choices as string[],
+          }));
+        }
+
+        return {
+          studySet,
+          flashcards: flashcards ?? [],
+          quizQuestions,
+        };
+      }
+    );
+  } catch (error) {
+    captureAppError(error, {
+      feature: "chat",
+      userId,
+      studySetId,
+      tool: "getStudySetContext",
+    });
+    throw error;
   }
-
-  return {
-    studySet,
-    flashcards: flashcards ?? [],
-    quizQuestions,
-  };
 }
 
 export function formatContextForPrompt(ctx: StudySetContext): string {
