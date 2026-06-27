@@ -5,6 +5,7 @@ import { checkRateLimit } from "@/lib/rate-limit";
 import { runStudyGeneration } from "@/lib/eve/run-study-generation";
 import { sendStudySetReadyEmail } from "@/lib/email";
 import { isSourceTextTooShort } from "@/lib/study-artifacts/generate";
+import { extractAiErrorDetails } from "@/lib/ai/error-details";
 import { bucketSourceLength, captureAppError, withAppSpan } from "@/lib/sentry";
 
 function clientSafeGenerationError(err: unknown): string {
@@ -126,13 +127,25 @@ export async function POST(request: Request) {
 
     return NextResponse.json({ success: true, saved });
   } catch (err) {
+    const aiErrorDetails = extractAiErrorDetails(err);
     captureAppError(err, {
       feature: "study_generation",
       userId: user.id,
       studySetId,
       tool: "runStudyGeneration",
-      extra: sourceLengthBucket ? { sourceLengthBucket } : undefined,
+      extra: {
+        ...(sourceLengthBucket ? { sourceLengthBucket } : {}),
+        ...aiErrorDetails,
+      },
     });
+
+    if (aiErrorDetails.errorCode === "invalid_json_schema") {
+      console.error("[api/generate] invalid_json_schema", {
+        studySetId,
+        userId: user.id,
+        ...aiErrorDetails,
+      });
+    }
     return NextResponse.json(
       { error: clientSafeGenerationError(err) },
       { status: 500 }
