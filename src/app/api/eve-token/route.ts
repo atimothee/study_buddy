@@ -1,5 +1,9 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import {
+  isAiConfigured,
+  shouldUseFallbackChat,
+} from "@/lib/ai/client";
 import { mintEveSessionToken, verifyEveSessionToken } from "@/lib/eve/session-token";
 
 export async function GET() {
@@ -20,7 +24,11 @@ export async function GET() {
         { status: 503 }
       );
     }
-    return NextResponse.json({ token });
+    return NextResponse.json({
+      token,
+      aiConfigured: isAiConfigured(),
+      preferFallback: shouldUseFallbackChat(),
+    });
   } catch {
     return NextResponse.json(
       { error: "Eve session token unavailable" },

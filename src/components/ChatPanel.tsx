@@ -78,6 +78,12 @@ export function ChatPanel({
   const bottomRef = useRef<HTMLDivElement>(null);
   const lastPersistedRef = useRef<string>("");
   const tempIdRef = useRef(0);
+  const sendFallbackRef = useRef<(message: string) => Promise<void>>(
+    async () => {}
+  );
+  const agentResetRef = useRef<(() => void) | null>(null);
+  const lastEveMessageRef = useRef<string | null>(null);
+  const eveFallbackRetryRef = useRef<string | null>(null);
 
   function nextTempId(prefix: string) {
     tempIdRef.current += 1;
@@ -100,16 +106,31 @@ export function ChatPanel({
     return () => subscription.unsubscribe();
   }, []);
 
-  const getEveAuthToken = useCallback(async () => {
+  const getEveSession = useCallback(async () => {
     try {
       const res = await fetch("/api/eve-token", { credentials: "include" });
-      if (!res.ok) return "";
-      const data = await readJsonBody<{ token?: string }>(res);
-      return data?.token ?? "";
+      if (!res.ok) {
+        return { token: "", preferFallback: true, aiConfigured: false };
+      }
+      const data = await readJsonBody<{
+        token?: string;
+        preferFallback?: boolean;
+        aiConfigured?: boolean;
+      }>(res);
+      return {
+        token: data?.token ?? "",
+        preferFallback: data?.preferFallback === true,
+        aiConfigured: data?.aiConfigured !== false,
+      };
     } catch {
-      return "";
+      return { token: "", preferFallback: true, aiConfigured: false };
     }
   }, []);
+
+  const getEveAuthToken = useCallback(async () => {
+    const session = await getEveSession();
+    return session.token;
+  }, [getEveSession]);
 
   useEffect(() => {
     if (!sessionReady) return;
@@ -117,9 +138,29 @@ export function ChatPanel({
     let cancelled = false;
 
     async function checkEveHealth() {
-      const token = await getEveAuthToken();
-      if (!token && !cancelled) {
-        setUseFallback(true);
+      try {
+        const res = await fetch("/eve/v1/health");
+        if (!res.ok && !cancelled) {
+          setUseFallback(true);
+          return;
+        }
+      } catch {
+        if (!cancelled) {
+          setUseFallback(true);
+        }
+        return;
+      }
+
+      const session = await getEveSession();
+      if (!cancelled) {
+        if (session.preferFallback || !session.token) {
+          setUseFallback(true);
+        }
+        if (!session.aiConfigured) {
+          setError(
+            "AI is not configured. Set AI_GATEWAY_API_KEY or OPENAI_API_KEY in your Vercel project settings, then redeploy."
+          );
+        }
       }
     }
 
@@ -128,7 +169,7 @@ export function ChatPanel({
     return () => {
       cancelled = true;
     };
-  }, [sessionReady, getEveAuthToken]);
+  }, [sessionReady, getEveSession]);
 
   const persistMessages = useCallback(
     async (
@@ -160,6 +201,22 @@ export function ChatPanel({
     [studySetId, userId]
   );
 
+  const retryEveWithFallback = useCallback(async (message: string) => {
+    const trimmed = message.trim();
+    if (!trimmed || eveFallbackRetryRef.current === trimmed) return;
+
+    eveFallbackRetryRef.current = trimmed;
+    setUseFallback(true);
+    setError(null);
+    agentResetRef.current?.();
+
+    try {
+      await sendFallbackRef.current(trimmed);
+    } finally {
+      eveFallbackRetryRef.current = null;
+    }
+  }, []);
+
   const agent = useEveAgent({
     auth: {
       bearer: getEveAuthToken,
@@ -177,16 +234,18 @@ export function ChatPanel({
     }),
     onError: (err) => {
       if (
-        /authorization|unexpected token|not valid json|an error occurred/i.test(
+        !/authorization|unexpected token|not valid json|an error occurred/i.test(
           err.message
         )
       ) {
-        setUseFallback(true);
-        setError(null);
-        return;
+        setError(err.message);
       }
-      setError(err.message);
       setUseFallback(true);
+
+      const pendingMessage = lastEveMessageRef.current;
+      if (pendingMessage) {
+        void retryEveWithFallback(pendingMessage);
+      }
     },
     onFinish: async (snapshot) => {
       const messages = snapshot.data.messages;
@@ -201,7 +260,12 @@ export function ChatPanel({
       const assistantText = textFromParts(lastAssistant.parts);
       const visuals = visualizationsFromParts(lastAssistant.parts);
 
-      if (!userText || !assistantText) return;
+      if (!userText) return;
+
+      if (!assistantText) {
+        void retryEveWithFallback(userText);
+        return;
+      }
 
       await persistMessages([
         { role: "user", content: userText },
@@ -213,6 +277,8 @@ export function ChatPanel({
       agent.reset();
     },
   });
+
+  agentResetRef.current = agent.reset;
 
   const isBusy =
     useFallback
@@ -376,6 +442,8 @@ export function ChatPanel({
     }
   }
 
+  sendFallbackRef.current = sendFallback;
+
   async function sendMessage(message: string) {
     const trimmed = message.trim();
     if (!trimmed || isBusy) return;
@@ -393,13 +461,14 @@ export function ChatPanel({
       return;
     }
 
-    const token = await getEveAuthToken();
-    if (!token) {
+    const session = await getEveSession();
+    if (session.preferFallback || !session.token) {
       await sendFallback(trimmed);
       return;
     }
 
     try {
+      lastEveMessageRef.current = trimmed;
       await agent.send({ message: trimmed });
     } catch (err) {
       const message =
@@ -410,7 +479,7 @@ export function ChatPanel({
         setError(message);
       }
       setUseFallback(true);
-      await sendFallback(trimmed);
+      await retryEveWithFallback(trimmed);
     }
   }
 

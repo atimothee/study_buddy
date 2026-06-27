@@ -3,7 +3,12 @@
  * Primary chat is powered by Eve via useEveAgent on /study-sets/[id]/chat.
  */
 import { streamText } from "ai";
-import { openai } from "@/lib/ai/client";
+import {
+  AI_NOT_CONFIGURED_MESSAGE,
+  getChatModel,
+  isAiConfigured,
+} from "@/lib/ai/client";
+import { extractAiErrorDetails } from "@/lib/ai/error-details";
 import { createClient } from "@/lib/supabase/server";
 import { chatMessageSchema } from "@/lib/validations";
 import { checkRateLimit } from "@/lib/rate-limit";
@@ -159,10 +164,17 @@ export async function POST(request: Request) {
       });
     }
 
+    if (!isAiConfigured()) {
+      return new Response(JSON.stringify({ error: AI_NOT_CONFIGURED_MESSAGE }), {
+        status: 503,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+
     const contextText = formatContextForPrompt(context);
 
     const result = streamText({
-      model: openai("gpt-4o-mini"),
+      model: getChatModel(),
       system: `${SYSTEM_PROMPT}\n\n---\nStudy Set Context:\n${contextText}`,
       messages: [{ role: "user", content: message }],
       onFinish: async ({ text }) => {
@@ -190,17 +202,27 @@ export async function POST(request: Request) {
 
     return result.toTextStreamResponse();
   } catch (error) {
+    const aiErrorDetails = extractAiErrorDetails(error);
     captureAppError(error, {
       feature: "chat",
       userId,
       studySetId,
       tool: "chatRoute",
+      extra: aiErrorDetails,
     });
-    return new Response(
-      JSON.stringify({
-        error: "We could not send your message. Please try again.",
-      }),
-      { status: 500 }
-    );
+
+    const message =
+      error instanceof Error ? error.message.trim() : "";
+    const clientError =
+      message.includes("AI_GATEWAY_API_KEY") ||
+      message.includes("OPENAI_API_KEY") ||
+      /api key|authentication|unauthenticated/i.test(message)
+        ? AI_NOT_CONFIGURED_MESSAGE
+        : "We could not send your message. Please try again.";
+
+    return new Response(JSON.stringify({ error: clientError }), {
+      status: 500,
+      headers: { "Content-Type": "application/json" },
+    });
   }
 }

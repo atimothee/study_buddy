@@ -1,8 +1,14 @@
 import { createOpenAI } from "@ai-sdk/openai";
 
+function getTrimmedEnv(name: string): string | null {
+  const value = process.env[name]?.trim();
+  return value ? value : null;
+}
+
+const gatewayKey = getTrimmedEnv("AI_GATEWAY_API_KEY");
+const openaiKey = getTrimmedEnv("OPENAI_API_KEY");
+
 export const openai = createOpenAI({
-  apiKey: process.env.AI_GATEWAY_API_KEY ?? process.env.OPENAI_API_KEY,
-  baseURL: process.env.AI_GATEWAY_API_KEY
-    ? "https://ai-gateway.vercel.sh/v1"
-    : undefined,
+  apiKey: gatewayKey ?? openaiKey ?? "",
+  baseURL: gatewayKey ? "https://ai-gateway.vercel.sh/v1" : undefined,
 });

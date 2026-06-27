@@ -5,9 +5,29 @@ import type { LanguageModel } from "ai";
 const GENERATION_MODEL = "gpt-4o-mini";
 const GATEWAY_GENERATION_MODEL = "openai/gpt-4o-mini";
 
+export const AI_NOT_CONFIGURED_MESSAGE =
+  "AI is not configured. Set AI_GATEWAY_API_KEY or OPENAI_API_KEY in your Vercel project settings, then redeploy.";
+
 function getTrimmedEnv(name: string): string | null {
   const value = process.env[name]?.trim();
   return value ? value : null;
+}
+
+export function isAiConfigured(): boolean {
+  return Boolean(
+    getTrimmedEnv("AI_GATEWAY_API_KEY") || getTrimmedEnv("OPENAI_API_KEY")
+  );
+}
+
+/** True when no AI provider keys are configured (force /api/chat, which will 503). */
+export function shouldUseFallbackChat(): boolean {
+  return !isAiConfigured();
+}
+
+export function assertAiConfigured(): void {
+  if (!isAiConfigured()) {
+    throw new Error(AI_NOT_CONFIGURED_MESSAGE);
+  }
 }
 
 function getOpenAiDirect() {
@@ -52,10 +72,36 @@ export function getGenerationModel(): LanguageModel {
   return getGenerationModelCandidates()[0]!;
 }
 
-/** @deprecated Use getGenerationModel() for new code. */
-export const openai = createOpenAI({
-  apiKey: process.env.AI_GATEWAY_API_KEY ?? process.env.OPENAI_API_KEY,
-  baseURL: process.env.AI_GATEWAY_API_KEY
-    ? "https://ai-gateway.vercel.sh/v1"
-    : undefined,
-});
+/** First available model for streaming chat. */
+export function getChatModel(): LanguageModel {
+  return getGenerationModel();
+}
+
+let cachedOpenAiProvider: ReturnType<typeof createOpenAI> | null = null;
+
+/** OpenAI provider for legacy call sites; validates env on first use. */
+export function getOpenAiProvider(): ReturnType<typeof createOpenAI> {
+  if (cachedOpenAiProvider) return cachedOpenAiProvider;
+
+  const gatewayKey = getTrimmedEnv("AI_GATEWAY_API_KEY");
+  const openaiKey = getTrimmedEnv("OPENAI_API_KEY");
+
+  if (gatewayKey) {
+    cachedOpenAiProvider = createOpenAI({
+      apiKey: gatewayKey,
+      baseURL: "https://ai-gateway.vercel.sh/v1",
+    });
+    return cachedOpenAiProvider;
+  }
+
+  if (openaiKey) {
+    cachedOpenAiProvider = createOpenAI({ apiKey: openaiKey });
+    return cachedOpenAiProvider;
+  }
+
+  throw new Error(AI_NOT_CONFIGURED_MESSAGE);
+}
+
+/** @deprecated Use getOpenAiProvider() or getChatModel(). */
+export const openai = ((modelId: string) =>
+  getOpenAiProvider()(modelId)) as ReturnType<typeof createOpenAI>;
