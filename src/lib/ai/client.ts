@@ -23,23 +23,33 @@ function getGateway() {
 }
 
 /**
- * Model for study generation, chat, and practice questions.
- * Prefers Vercel AI Gateway when configured; falls back to OpenAI directly.
+ * Ordered model candidates for study generation.
+ * Tries AI Gateway first when configured, then direct OpenAI.
  */
-export function getGenerationModel(): LanguageModel {
+export function getGenerationModelCandidates(): LanguageModel[] {
+  const models: LanguageModel[] = [];
   const gateway = getGateway();
-  if (gateway) {
-    return gateway(GATEWAY_GENERATION_MODEL);
-  }
-
   const openai = getOpenAiDirect();
+
+  if (gateway) {
+    models.push(gateway(GATEWAY_GENERATION_MODEL));
+  }
   if (openai) {
-    return openai(GENERATION_MODEL);
+    models.push(openai(GENERATION_MODEL));
   }
 
-  throw new Error(
-    "Missing AI_GATEWAY_API_KEY or OPENAI_API_KEY for study generation"
-  );
+  if (models.length === 0) {
+    throw new Error(
+      "Missing AI_GATEWAY_API_KEY or OPENAI_API_KEY for study generation"
+    );
+  }
+
+  return models;
+}
+
+/** First available generation model. */
+export function getGenerationModel(): LanguageModel {
+  return getGenerationModelCandidates()[0]!;
 }
 
 /** @deprecated Use getGenerationModel() for new code. */

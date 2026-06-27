@@ -1,8 +1,9 @@
 import { generateObject } from "ai";
-import { getGenerationModel } from "@/lib/ai/client";
+import { getGenerationModelCandidates } from "@/lib/ai/client";
 import {
   buildGenerationSchema,
   MIN_SOURCE_TEXT_LENGTH,
+  normalizeGenerationArtifacts,
   type GenerateStudyArtifactsOptions,
   type StudyArtifacts,
 } from "@/lib/study-artifacts/schemas";
@@ -22,11 +23,22 @@ Rules:
 - For definition cards: front = term, back = definition from source.
 - For compare_contrast cards: front = comparison prompt, back = contrast from source.
 - For application cards: front = scenario/question, back = application of concept from source.
-- Add 1-3 relevant tags per card when possible. Include source_quote when a direct quote grounds the card.
+- For unused flashcard fields (cloze_text, answer, explanation, source_quote), use an empty string.
+- For cards with no tags, return an empty tags array.
 - Quiz questions should test understanding, not just rote memorization.
-- Every quiz question must have exactly 4 choices and a clear explanation.
-- correct_answer must exactly match one of the choices strings.
+- Every quiz question must have exactly 4 choices via choice_a, choice_b, choice_c, and choice_d.
+- correct_answer must exactly match one of the four choice strings.
 - Write a concise summary (2-4 paragraphs) of the key points.`;
+
+function isAuthOrConfigError(message: string): boolean {
+  return /missing ai_gateway|missing openai|authentication failed|api key|unauthenticated/i.test(
+    message
+  );
+}
+
+function isInvalidSchemaError(message: string): boolean {
+  return /invalid schema|invalid_json_schema/i.test(message);
+}
 
 export function isSourceTextTooShort(sourceText: string | null | undefined): boolean {
   return !sourceText || sourceText.trim().length < MIN_SOURCE_TEXT_LENGTH;
@@ -37,39 +49,63 @@ export async function generateStudyArtifactsFromSource(
   options?: GenerateStudyArtifactsOptions
 ): Promise<StudyArtifacts> {
   const sourceLengthBucket = bucketSourceLength(sourceText.length);
+  const schema = buildGenerationSchema(options);
+  const prompt = `Generate study materials from this source text:\n\n${sourceText}`;
 
-  try {
-    const schema = buildGenerationSchema(options);
+  const models = getGenerationModelCandidates();
+  let lastError: unknown;
 
-    const { object } = await withAppSpan(
-      "llm.generateStudyArtifacts",
-      "ai.generation",
-      { feature: "study_generation", sourceLengthBucket },
-      () =>
-        generateObject({
-          model: getGenerationModel(),
-          schema,
-          system: SYSTEM_PROMPT,
-          prompt: `Generate study materials from this source text:\n\n${sourceText}`,
-        })
-    );
+  for (let index = 0; index < models.length; index += 1) {
+    const model = models[index]!;
 
-    return object;
-  } catch (error) {
-    captureAppError(error, {
-      feature: "study_generation",
-      tool: "generateStudyArtifacts",
-      extra: { sourceLengthBucket },
-    });
+    try {
+      const { object } = await withAppSpan(
+        "llm.generateStudyArtifacts",
+        "ai.generation",
+        {
+          feature: "study_generation",
+          sourceLengthBucket,
+          modelIndex: index,
+        },
+        () =>
+          generateObject({
+            model,
+            schema,
+            system: SYSTEM_PROMPT,
+            prompt,
+          })
+      );
 
-    const message =
-      error instanceof Error ? error.message : "Unknown generation error";
-    if (/missing ai_gateway|missing openai|authentication failed|api key/i.test(message)) {
+      return normalizeGenerationArtifacts(object);
+    } catch (error) {
+      lastError = error;
+      const message =
+        error instanceof Error ? error.message : "Unknown generation error";
+
+      captureAppError(error, {
+        feature: "study_generation",
+        tool: "generateStudyArtifacts",
+        extra: { sourceLengthBucket, modelIndex: index, message },
+      });
+
+      const hasFallback = index < models.length - 1;
+      if (hasFallback && (isAuthOrConfigError(message) || isInvalidSchemaError(message))) {
+        continue;
+      }
+
+      if (isAuthOrConfigError(message)) {
+        throw new Error(
+          "AI generation is not configured. Set AI_GATEWAY_API_KEY or OPENAI_API_KEY on the server."
+        );
+      }
+
       throw new Error(
-        "AI generation is not configured. Set AI_GATEWAY_API_KEY or OPENAI_API_KEY on the server."
+        "We could not generate your study materials. Please try again."
       );
     }
-
-    throw new Error("We could not generate your study materials. Please try again.");
   }
+
+  throw lastError instanceof Error
+    ? lastError
+    : new Error("We could not generate your study materials. Please try again.");
 }

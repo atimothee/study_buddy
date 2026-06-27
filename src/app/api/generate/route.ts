@@ -7,6 +7,29 @@ import { sendStudySetReadyEmail } from "@/lib/email";
 import { isSourceTextTooShort } from "@/lib/study-artifacts/generate";
 import { bucketSourceLength, captureAppError, withAppSpan } from "@/lib/sentry";
 
+function clientSafeGenerationError(err: unknown): string {
+  const fallback =
+    "We could not generate your study materials. Please try again.";
+  if (!(err instanceof Error)) return fallback;
+
+  const message = err.message.trim();
+  if (!message) return fallback;
+
+  if (
+    /unauthorized|invalid study set|rate limit|at least 100 characters|not found/i.test(
+      message
+    )
+  ) {
+    return message;
+  }
+
+  if (/ai generation is not configured|api_key|openai_api_key|ai_gateway/i.test(message)) {
+    return message;
+  }
+
+  return fallback;
+}
+
 export const maxDuration = 60;
 
 export async function POST(request: Request) {
@@ -111,7 +134,7 @@ export async function POST(request: Request) {
       extra: sourceLengthBucket ? { sourceLengthBucket } : undefined,
     });
     return NextResponse.json(
-      { error: "We could not generate your study materials. Please try again." },
+      { error: clientSafeGenerationError(err) },
       { status: 500 }
     );
   }
