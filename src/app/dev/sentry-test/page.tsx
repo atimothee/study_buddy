@@ -1,6 +1,8 @@
 import { notFound } from "next/navigation";
 import { SentryTestActions } from "./SentryTestActions";
 
+export const dynamic = "force-dynamic";
+
 export default function SentryTestPage() {
   if (process.env.NODE_ENV !== "development") {
     notFound();

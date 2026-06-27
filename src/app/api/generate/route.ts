@@ -40,6 +40,7 @@ export async function POST(request: Request) {
   }
 
   const { studySetId } = parsed.data;
+  let sourceLengthBucket: string | undefined;
 
   try {
     const { data: studySet, error: fetchError } = await withAppSpan(
@@ -59,7 +60,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Study set not found" }, { status: 404 });
     }
 
-    const sourceLengthBucket = bucketSourceLength(
+    sourceLengthBucket = bucketSourceLength(
       studySet.source_text?.length ?? 0
     );
 
@@ -73,7 +74,12 @@ export async function POST(request: Request) {
     const saved = await withAppSpan(
       "study_generation.run",
       "study.generation",
-      { feature: "study_generation", studySetId, userId: user.id },
+      {
+        feature: "study_generation",
+        studySetId,
+        userId: user.id,
+        sourceLengthBucket,
+      },
       () => runStudyGeneration(studySetId, user.id)
     );
 
@@ -92,6 +98,7 @@ export async function POST(request: Request) {
       userId: user.id,
       studySetId,
       tool: "runStudyGeneration",
+      extra: sourceLengthBucket ? { sourceLengthBucket } : undefined,
     });
     return NextResponse.json(
       { error: "We could not generate your study materials. Please try again." },
