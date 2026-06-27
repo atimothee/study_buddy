@@ -10,7 +10,7 @@ import {
 } from "@/lib/study-artifacts/save";
 import type { GenerateStudyArtifactsOptions } from "@/lib/study-artifacts/schemas";
 import { captureAppError, withAppSpan } from "@/lib/sentry";
-import { Client } from "eve/client";
+import { createAuthenticatedEveClient } from "@/lib/eve/client";
 import { z } from "zod";
 
 const eveResultSchema = z.object({
@@ -20,17 +20,9 @@ const eveResultSchema = z.object({
   quizQuestionCount: z.number(),
 });
 
-function getEveHost(): string {
-  return (
-    process.env.EVE_AGENT_URL ??
-    process.env.NEXT_PUBLIC_APP_URL ??
-    "http://127.0.0.1:3000"
-  );
-}
-
-async function isEveAvailable(): Promise<boolean> {
+async function isEveAvailable(accessToken?: string | null): Promise<boolean> {
   try {
-    const client = new Client({ host: getEveHost() });
+    const client = await createAuthenticatedEveClient(accessToken);
     const health = await client.health();
     return health.ok === true;
   } catch {
@@ -41,6 +33,7 @@ async function isEveAvailable(): Promise<boolean> {
 async function generateViaEveAgent(
   studySetId: string,
   userId: string,
+  accessToken: string | null | undefined,
   options?: GenerateStudyArtifactsOptions
 ): Promise<SaveStudyArtifactsResult> {
   return withAppSpan(
@@ -48,7 +41,7 @@ async function generateViaEveAgent(
     "agent.execution",
     { feature: "study_generation", studySetId, userId },
     async () => {
-      const client = new Client({ host: getEveHost() });
+      const client = await createAuthenticatedEveClient(accessToken);
       const session = client.session();
 
       const response = await session.send({
@@ -127,11 +120,17 @@ async function generateViaSharedTools(
 export async function runStudyGeneration(
   studySetId: string,
   userId: string,
-  options?: GenerateStudyArtifactsOptions
+  options?: GenerateStudyArtifactsOptions,
+  accessToken?: string | null
 ): Promise<SaveStudyArtifactsResult> {
-  if (await isEveAvailable()) {
+  if (await isEveAvailable(accessToken)) {
     try {
-      return await generateViaEveAgent(studySetId, userId, options);
+      return await generateViaEveAgent(
+        studySetId,
+        userId,
+        accessToken,
+        options
+      );
     } catch (err) {
       captureAppError(err, {
         feature: "study_generation",

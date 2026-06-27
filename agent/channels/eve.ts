@@ -4,7 +4,7 @@ import {
   type EveMessageContext,
 } from "eve/channels/eve";
 import { localDev, vercelOidc } from "eve/channels/auth";
-import { supabaseBearerAuth } from "../lib/supabase-auth.js";
+import { supabaseBearerAuth, supabaseCookieAuth } from "../lib/supabase-auth.js";
 
 import {
   extractConceptFromMessage,
@@ -45,7 +45,7 @@ function studyBuddyOnMessage(ctx: EveMessageContext, message: string | unknown) 
 }
 
 export default eveChannel({
-  auth: [supabaseBearerAuth(), vercelOidc(), localDev()],
+  auth: [supabaseBearerAuth(), supabaseCookieAuth(), vercelOidc(), localDev()],
   cors: true,
   onMessage: studyBuddyOnMessage,
 });

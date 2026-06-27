@@ -73,7 +73,7 @@ export function ChatPanel({
   const [useFallback, setUseFallback] = useState(false);
   const [fallbackLoading, setFallbackLoading] = useState(false);
   const [visualLoading, setVisualLoading] = useState(false);
-  const [accessToken, setAccessToken] = useState<string | null>(null);
+  const [sessionReady, setSessionReady] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
   const lastPersistedRef = useRef<string>("");
   const tempIdRef = useRef(0);
@@ -85,24 +85,55 @@ export function ChatPanel({
 
   useEffect(() => {
     const supabase = createClient();
+
     supabase.auth.getSession().then(({ data }) => {
-      setAccessToken(data.session?.access_token ?? null);
+      setSessionReady(true);
     });
+
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange(() => {
+      setSessionReady(true);
+    });
+
+    return () => subscription.unsubscribe();
+  }, []);
+
+  const getAccessToken = useCallback(async () => {
+    const supabase = createClient();
+    const { data } = await supabase.auth.getSession();
+    return data.session?.access_token ?? "";
   }, []);
 
   useEffect(() => {
+    if (!sessionReady) return;
+
     let cancelled = false;
-    fetch("/eve/v1/health")
-      .then((res) => {
+
+    async function checkEveHealth() {
+      const token = await getAccessToken();
+      const headers: HeadersInit = {};
+      if (token) {
+        headers.Authorization = `Bearer ${token}`;
+      }
+
+      try {
+        const res = await fetch("/eve/v1/health", {
+          credentials: "include",
+          headers,
+        });
         if (!res.ok && !cancelled) setUseFallback(true);
-      })
-      .catch(() => {
+      } catch {
         if (!cancelled) setUseFallback(true);
-      });
+      }
+    }
+
+    void checkEveHealth();
+
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [sessionReady, getAccessToken]);
 
   const persistMessages = useCallback(
     async (
@@ -136,7 +167,7 @@ export function ChatPanel({
 
   const agent = useEveAgent({
     auth: {
-      bearer: async () => accessToken ?? "",
+      bearer: getAccessToken,
     },
     prepareSend: (payload) => ({
       ...payload,
@@ -150,6 +181,11 @@ export function ChatPanel({
       },
     }),
     onError: (err) => {
+      if (/authorization/i.test(err.message)) {
+        setUseFallback(true);
+        setError(null);
+        return;
+      }
       setError(err.message);
       setUseFallback(true);
     },
@@ -343,7 +379,13 @@ export function ChatPanel({
       return;
     }
 
-    if (useFallback || !accessToken) {
+    if (useFallback || !sessionReady) {
+      await sendFallback(trimmed);
+      return;
+    }
+
+    const token = await getAccessToken();
+    if (!token) {
       await sendFallback(trimmed);
       return;
     }

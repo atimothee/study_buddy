@@ -80,7 +80,17 @@ export async function POST(request: Request) {
         userId: user.id,
         sourceLengthBucket,
       },
-      () => runStudyGeneration(studySetId, user.id)
+      async () => {
+        const {
+          data: { session },
+        } = await supabase.auth.getSession();
+        return runStudyGeneration(
+          studySetId,
+          user.id,
+          undefined,
+          session?.access_token ?? null
+        );
+      }
     );
 
     if (user.email) {
