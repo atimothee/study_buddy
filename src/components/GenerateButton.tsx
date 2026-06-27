@@ -8,6 +8,7 @@ import {
   GenerationProgress,
   GENERATION_STEPS,
 } from "@/components/GenerationProgress";
+import { readApiError, readJsonBody } from "@/lib/parse-json-response";
 
 interface GenerateButtonProps {
   studySetId: string;
@@ -72,10 +73,17 @@ export function GenerateButton({
         body: JSON.stringify({ studySetId }),
       });
 
-      const data = await res.json();
+      const data = await readJsonBody<{ error?: string }>(res);
 
       if (!res.ok) {
-        throw new Error(data.error ?? "Generation failed");
+        throw new Error(
+          data?.error ??
+            (await readApiError(res, "Generation failed"))
+        );
+      }
+
+      if (!data) {
+        throw new Error("Generation failed");
       }
 
       stopStepper();

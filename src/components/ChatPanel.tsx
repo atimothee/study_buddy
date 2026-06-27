@@ -21,6 +21,7 @@ import {
   isVisualizationRequest,
 } from "@/lib/concept-grounding";
 import { getChatPromptChips } from "@/lib/chat-prompts";
+import { readApiError, readJsonBody } from "@/lib/parse-json-response";
 import type { ChatMessage } from "@/lib/types";
 
 interface ChatPanelProps {
@@ -100,10 +101,14 @@ export function ChatPanel({
   }, []);
 
   const getEveAuthToken = useCallback(async () => {
-    const res = await fetch("/api/eve-token", { credentials: "include" });
-    if (!res.ok) return "";
-    const data = (await res.json()) as { token?: string };
-    return data.token ?? "";
+    try {
+      const res = await fetch("/api/eve-token", { credentials: "include" });
+      if (!res.ok) return "";
+      const data = await readJsonBody<{ token?: string }>(res);
+      return data?.token ?? "";
+    } catch {
+      return "";
+    }
   }, []);
 
   useEffect(() => {
@@ -171,7 +176,11 @@ export function ChatPanel({
       },
     }),
     onError: (err) => {
-      if (/authorization/i.test(err.message)) {
+      if (
+        /authorization|unexpected token|not valid json|an error occurred/i.test(
+          err.message
+        )
+      ) {
         setUseFallback(true);
         setError(null);
         return;
@@ -262,7 +271,16 @@ export function ChatPanel({
           }),
         });
 
-        const data = await res.json();
+        const data = await readJsonBody<{
+          type?: string;
+          visual?: VisualizationPayload;
+          message?: string;
+          error?: string;
+        }>(res);
+
+        if (!data) {
+          throw new Error("Could not create visual explanation.");
+        }
 
         if (data.type === "visual" && data.visual) {
           await deliverVisual(data.visual as VisualizationPayload);
@@ -315,8 +333,9 @@ export function ChatPanel({
       });
 
       if (!res.ok) {
-        const data = await res.json();
-        throw new Error(data.error ?? "Failed to send message");
+        throw new Error(
+          await readApiError(res, "Failed to send message")
+        );
       }
 
       const reader = res.body?.getReader();
@@ -383,7 +402,13 @@ export function ChatPanel({
     try {
       await agent.send({ message: trimmed });
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Eve agent unavailable");
+      const message =
+        err instanceof Error ? err.message : "Eve agent unavailable";
+      if (
+        !/unexpected token|not valid json|an error occurred/i.test(message)
+      ) {
+        setError(message);
+      }
       setUseFallback(true);
       await sendFallback(trimmed);
     }
@@ -588,7 +613,11 @@ export function ChatPanel({
         </div>
       </form>
 
-      {(error || (agent.error && !/authorization/i.test(agent.error.message))) && (
+      {(error ||
+        (agent.error &&
+          !/authorization|unexpected token|not valid json|an error occurred/i.test(
+            agent.error.message
+          ))) && (
         <p className="px-4 pb-3 text-sm text-red-600">
           {error ?? agent.error?.message}
         </p>

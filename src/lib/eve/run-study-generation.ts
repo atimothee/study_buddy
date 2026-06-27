@@ -20,10 +20,14 @@ const eveResultSchema = z.object({
   quizQuestionCount: z.number(),
 });
 
+const useEveGeneration = process.env.EVE_GENERATION_ENABLED === "true";
+
 async function isEveAvailable(
   userId: string,
   accessToken?: string | null
 ): Promise<boolean> {
+  if (!useEveGeneration) return false;
+
   try {
     const client = await createAuthenticatedEveClient(userId, accessToken);
     const health = await client.health();

@@ -2,11 +2,15 @@ import { Client, type ClientAuth } from "eve/client";
 import { mintEveSessionToken } from "@/lib/eve/session-token";
 
 export function getEveHost(): string {
-  return (
-    process.env.EVE_AGENT_URL ??
-    process.env.NEXT_PUBLIC_APP_URL ??
-    "http://127.0.0.1:3000"
-  );
+  if (process.env.EVE_AGENT_URL) {
+    return process.env.EVE_AGENT_URL;
+  }
+
+  if (process.env.VERCEL_URL) {
+    return `https://${process.env.VERCEL_URL}`;
+  }
+
+  return process.env.NEXT_PUBLIC_APP_URL ?? "http://127.0.0.1:3000";
 }
 
 async function buildEveClientAuth(

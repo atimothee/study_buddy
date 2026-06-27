@@ -8,7 +8,7 @@ export const GENERATION_STEPS = [
   { id: "summary", label: "Creating summary" },
   { id: "flashcards", label: "Generating cloze flashcards" },
   { id: "quiz", label: "Building quiz" },
-  { id: "chat", label: "Preparing study chat" },
+  { id: "save", label: "Saving to your study set" },
 ] as const;
 
 interface GenerationProgressProps {

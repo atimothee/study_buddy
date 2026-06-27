@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { createStudySet } from "@/app/actions";
 import { AppShell } from "@/components/AppShell";
 import { SourceInput } from "@/components/SourceInput";
-import { LoadingSpinner } from "@/components/LoadingSpinner";
+import { GenerationProgress } from "@/components/GenerationProgress";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -16,6 +16,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { readApiError, readJsonBody } from "@/lib/parse-json-response";
 
 export default function NewStudySetPage() {
   const router = useRouter();
@@ -51,10 +52,16 @@ export default function NewStudySetPage() {
         body: JSON.stringify({ studySetId: result.studySetId }),
       });
 
-      const data = await res.json();
+      const data = await readJsonBody<{ error?: string }>(res);
 
       if (!res.ok) {
-        throw new Error(data.error ?? "Generation failed");
+        throw new Error(
+          data?.error ??
+            (await readApiError(
+              res,
+              "Study set created, but generation failed. Open the study set to try again."
+            ))
+        );
       }
 
       router.push(`/study-sets/${result.studySetId}`);
@@ -73,7 +80,7 @@ export default function NewStudySetPage() {
     return (
       <AppShell>
         <div className="mx-auto flex max-w-2xl flex-col items-center justify-center py-24">
-          <LoadingSpinner label="Generating your study materials..." />
+          <GenerationProgress activeStep={2} />
         </div>
       </AppShell>
     );
