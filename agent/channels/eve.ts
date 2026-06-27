@@ -6,21 +6,41 @@ import {
 import { localDev, vercelOidc } from "eve/channels/auth";
 import { supabaseBearerAuth } from "../lib/supabase-auth.js";
 
+import {
+  extractConceptFromMessage,
+  hasVisualIntent,
+} from "../../src/lib/concept-grounding.js";
+
 function studyBuddyOnMessage(ctx: EveMessageContext, message: string | unknown) {
   const text =
     typeof message === "string"
       ? message
       : JSON.stringify(message).slice(0, 500);
 
+  const visualRequest = hasVisualIntent(text);
+  const concept = extractConceptFromMessage(text);
+
+  const contextLines = [
+    "StudyBuddy session. Client context on this turn includes studySetId and userId when provided by the web app.",
+    "Always call getStudySetContext first when you need material context.",
+    "When asked what you can help with, mention visual explanations for difficult concepts.",
+    "Persist user and assistant messages with saveChatMessage using the same studySetId and userId.",
+    `Latest user message preview: ${text.slice(0, 280)}`,
+  ];
+
+  if (visualRequest) {
+    contextLines.push(
+      `VISUAL REQUEST DETECTED. You MUST call visualizeConcept immediately with studySetId and userId from clientContext and concept="${concept}". Do not say you cannot visualize. Do not answer from memory before calling the tool.`
+    );
+  } else {
+    contextLines.push(
+      "When the user asks to visualize, illustrate, draw, sketch, or diagram a concept, call visualizeConcept immediately with the core concept name."
+    );
+  }
+
   return {
     auth: defaultEveAuth(ctx),
-    context: [
-      "StudyBuddy session. Client context on this turn includes studySetId and userId when provided by the web app.",
-      "Always call getStudySetContext first when you need material context.",
-      "When the user asks to visualize, illustrate, draw, sketch, or diagram a concept, call visualizeConcept immediately with the core concept name.",
-      "Persist user and assistant messages with saveChatMessage using the same studySetId and userId.",
-      `Latest user message preview: ${text.slice(0, 280)}`,
-    ],
+    context: contextLines,
   };
 }
 

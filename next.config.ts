@@ -9,8 +9,8 @@ const nextConfig: NextConfig = {
 const sentryAuthToken = process.env.SENTRY_AUTH_TOKEN;
 
 export default withSentryConfig(withEve(nextConfig), {
-  org: process.env.SENTRY_ORG,
-  project: process.env.SENTRY_PROJECT,
+  org: process.env.SENTRY_ORG ?? "my-org-guk",
+  project: process.env.SENTRY_PROJECT ?? "javascript-nextjs",
   authToken: sentryAuthToken,
   silent: !process.env.CI,
   tunnelRoute: "/monitoring",
@@ -19,6 +19,7 @@ export default withSentryConfig(withEve(nextConfig), {
     disable: !sentryAuthToken,
   },
   webpack: {
+    automaticVercelMonitors: true,
     treeshake: {
       removeDebugLogging: true,
     },

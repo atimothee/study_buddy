@@ -11,6 +11,14 @@ import {
   formatContextForPrompt,
   getStudySetContext,
 } from "@/lib/study-context";
+import {
+  hasVisualIntent,
+  resolveVisualizationConcept,
+} from "@/lib/concept-grounding";
+import {
+  buildVisualizationResult,
+  formatVisualAssistantContent,
+} from "@/lib/visualization-build";
 import { captureAppError, withAppSpan } from "@/lib/sentry";
 
 export const maxDuration = 60;
@@ -21,6 +29,11 @@ Scope:
 - Help students understand and review material from their uploaded study sets.
 - Answer ONLY using the provided study set context (source text, summary, flashcards, quiz).
 
+Capabilities:
+- Answer questions grounded in the study material
+- Generate practice questions for active recall
+- Create Xiaohei-style visual explanations of concepts from the study material
+
 Behavior:
 - Be concise.
 - Ask one question at a time when quizzing.
@@ -28,7 +41,7 @@ Behavior:
 - Do not invent facts outside the source material.
 - When unsure, say: "I don't see that in your study material."
 - Encourage active recall.
-- You can generate additional practice questions on request, grounded in the material.`;
+- When asked what you can help with, mention visual explanations for difficult concepts.`;
 
 export async function POST(request: Request) {
   let studySetId: string | undefined;
@@ -102,6 +115,49 @@ export async function POST(request: Request) {
           content: message,
         })
     );
+
+    if (hasVisualIntent(message)) {
+      const concept = resolveVisualizationConcept(message, context.studySet);
+      const visual = await buildVisualizationResult(
+        {
+          studySet: {
+            title: context.studySet.title,
+            summary: context.studySet.summary ?? undefined,
+            sourceText: context.studySet.source_text ?? "",
+          },
+          flashcards: context.flashcards,
+          quizQuestions: context.quizQuestions.map((question) => ({
+            question: question.question,
+            explanation: question.explanation ?? undefined,
+            correctAnswer: question.correct_answer,
+          })),
+        },
+        concept,
+        message
+      );
+
+      const assistantContent =
+        "error" in visual
+          ? visual.error
+          : formatVisualAssistantContent(visual);
+
+      await withAppSpan(
+        "chat.saveAssistantMessage",
+        "db.query",
+        { feature: "chat", studySetId, userId },
+        () =>
+          supabase.from("chat_messages").insert({
+            study_set_id: studySetId,
+            user_id: userId,
+            role: "assistant",
+            content: assistantContent,
+          })
+      );
+
+      return new Response(assistantContent, {
+        headers: { "Content-Type": "text/plain; charset=utf-8" },
+      });
+    }
 
     const contextText = formatContextForPrompt(context);
 

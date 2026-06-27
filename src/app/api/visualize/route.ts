@@ -2,7 +2,10 @@ import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { checkRateLimit } from "@/lib/rate-limit";
 import { visualizeConceptSchema } from "@/lib/validations";
-import { extractConceptFromMessage } from "@/lib/concept-grounding";
+import {
+  extractConceptFromMessage,
+  resolveVisualizationConcept,
+} from "@/lib/concept-grounding";
 import { buildVisualizationResult } from "@/lib/visualization-build";
 import { captureAppError, withAppSpan } from "@/lib/sentry";
 
@@ -47,7 +50,6 @@ export async function POST(request: Request) {
     }
 
     studySetId = parsed.data.studySetId;
-    const concept = extractConceptFromMessage(parsed.data.concept);
     const userInstruction = parsed.data.userInstruction;
 
     const { data: studySet, error: fetchError } = await withAppSpan(
@@ -66,6 +68,11 @@ export async function POST(request: Request) {
     if (fetchError || !studySet) {
       return NextResponse.json({ error: "Study set not found" }, { status: 404 });
     }
+
+    const concept = resolveVisualizationConcept(
+      parsed.data.userInstruction ?? parsed.data.concept,
+      studySet
+    );
 
     const { data: flashcards } = await supabase
       .from("flashcards")

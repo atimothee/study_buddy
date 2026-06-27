@@ -50,11 +50,41 @@ const STOP_WORDS = new Set([
   "about",
 ]);
 
+const VAGUE_VISUAL_PATTERN =
+  /^(can you )?(please )?(visuali[sz]e|draw|illustrat|sketch|diagram)( (something|it|this|a concept|for me))?[?.!]*$/i;
+
 const VISUAL_INTENT_PATTERN =
-  /\b(visuali[sz]e|draw|illustrat|sketch|diagram|xiaohei|explain\s+this\s+visually|visual\s+explanation)\b/i;
+  /\b(visuali[sz]e|visuali[sz]ation|draw|illustrat|sketch|diagram|xiaohei|explain\s+.*\s+visually|visual\s+explanation|make\s+(a\s+)?visual|create\s+(a\s+)?visual)\b/i;
 
 export function hasVisualIntent(message: string): boolean {
-  return VISUAL_INTENT_PATTERN.test(message);
+  return VISUAL_INTENT_PATTERN.test(message) || VAGUE_VISUAL_PATTERN.test(message.trim());
+}
+
+export function isVagueVisualRequest(message: string): boolean {
+  const extracted = extractConceptFromMessage(message);
+  return (
+    VAGUE_VISUAL_PATTERN.test(message.trim()) ||
+    extractSearchTerms(extracted).length === 0
+  );
+}
+
+export function resolveVisualizationConcept(
+  message: string,
+  studySet: { title: string; summary?: string | null }
+): string {
+  const extracted = extractConceptFromMessage(message);
+  if (!isVagueVisualRequest(message) && extractSearchTerms(extracted).length > 0) {
+    return extracted;
+  }
+
+  if (studySet.summary?.trim()) {
+    const firstSentence = studySet.summary.split(/[.!?]/)[0]?.trim();
+    if (firstSentence && firstSentence.length > 10) {
+      return firstSentence.slice(0, 120);
+    }
+  }
+
+  return studySet.title;
 }
 
 export function extractConceptFromMessage(message: string): string {
@@ -203,5 +233,44 @@ export function isConceptGrounded(
   sources: string[],
   concept: string
 ): boolean {
-  return scoreConceptMatch(sources.join("\n"), concept).matched;
+  const haystack = sources.join("\n");
+  if (!haystack.trim()) return false;
+
+  const { matched, terms } = scoreConceptMatch(haystack, concept);
+  if (matched) return true;
+
+  // Allow study-set-level concepts when material exists.
+  if (terms.length === 0 && haystack.trim().length > 50) {
+    return true;
+  }
+
+  return false;
+}
+
+export function conceptAlignsWithStudySet(
+  concept: string,
+  studySetTitle: string
+): boolean {
+  const conceptTerms = extractSearchTerms(concept);
+  const titleTerms = extractSearchTerms(studySetTitle);
+  if (conceptTerms.length === 0 || titleTerms.length === 0) return false;
+
+  return conceptTerms.some((conceptTerm) =>
+    titleTerms.some(
+      (titleTerm) =>
+        termMatchesHaystack(titleTerm, conceptTerm) ||
+        termMatchesHaystack(conceptTerm, titleTerm)
+    )
+  );
+}
+
+export function defaultGroundingFromSources(sources: string[]): string {
+  for (const source of sources) {
+    const line = source
+      .split(/\n+/)
+      .map((entry) => entry.trim())
+      .find(Boolean);
+    if (line) return line.slice(0, 500);
+  }
+  return "";
 }

@@ -1,8 +1,11 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
+  conceptAlignsWithStudySet,
+  defaultGroundingFromSources,
   findBestGroundingSnippet,
   isConceptGrounded,
+  isVagueVisualRequest,
 } from "@/lib/concept-grounding";
 
 const SKILL_ROOT = join(
@@ -60,10 +63,31 @@ export async function buildVisualizationResult(
   grounding?: string
 ): Promise<VisualizationResult | { error: string }> {
   const sources = contextSources(context);
-  const sourceGrounding =
+  const haystack = sources.join("\n");
+
+  if (!haystack.trim()) {
+    return { error: "Add study material before creating a visual explanation." };
+  }
+
+  let sourceGrounding =
     grounding?.trim() || findBestGroundingSnippet(sources, concept);
 
-  if (!sourceGrounding || !isConceptGrounded(sources, concept)) {
+  const grounded = isConceptGrounded(sources, concept);
+  const studySetLevel =
+    isVagueVisualRequest(userInstruction ?? concept) ||
+    conceptAlignsWithStudySet(concept, context.studySet.title);
+
+  if (!grounded && !studySetLevel) {
+    return { error: "I don't see that in your study material." };
+  }
+
+  if (!sourceGrounding) {
+    sourceGrounding =
+      findBestGroundingSnippet(sources, context.studySet.title) ||
+      defaultGroundingFromSources(sources);
+  }
+
+  if (!sourceGrounding) {
     return { error: "I don't see that in your study material." };
   }
 
@@ -109,4 +133,11 @@ export async function buildVisualizationResult(
     illustrationFormat: "prompt",
     sourceGrounding,
   };
+}
+
+export function formatVisualAssistantContent(
+  visual: VisualizationResult
+): string {
+  const assistantText = `Here's a visual explanation of "${visual.title}" based on your study material.`;
+  return `${assistantText}\n\n---visualization---\n${JSON.stringify(visual)}`;
 }

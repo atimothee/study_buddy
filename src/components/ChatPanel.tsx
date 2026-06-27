@@ -25,6 +25,7 @@ import type { ChatMessage } from "@/lib/types";
 interface ChatPanelProps {
   studySetId: string;
   userId: string;
+  studySetTitle: string;
   initialMessages: ChatMessage[];
 }
 
@@ -62,6 +63,7 @@ function serializeAssistantForPersist(
 export function ChatPanel({
   studySetId,
   userId,
+  studySetTitle,
   initialMessages,
 }: ChatPanelProps) {
   const [input, setInput] = useState("");
@@ -134,6 +136,10 @@ export function ChatPanel({
       clientContext: {
         studySetId,
         userId,
+        studySetTitle,
+        visualRequest:
+          typeof payload.message === "string" &&
+          hasVisualIntent(payload.message),
       },
     }),
     onError: (err) => {
@@ -219,10 +225,26 @@ export function ChatPanel({
           { role: "assistant", content: assistantContent },
         ]);
       } catch (err) {
-        setError(
-          err instanceof Error ? err.message : "Failed to create visual explanation"
-        );
-        setHistory((prev) => prev.filter((m) => m.id !== optimisticId));
+        const errorText =
+          err instanceof Error
+            ? err.message
+            : "Failed to create visual explanation";
+        setHistory((prev) => [
+          ...prev.filter((m) => m.id !== optimisticId),
+          optimisticUser,
+          {
+            id: `temp-assistant-${Date.now()}`,
+            study_set_id: studySetId,
+            user_id: userId,
+            role: "assistant",
+            content: errorText,
+            created_at: new Date().toISOString(),
+          },
+        ]);
+        await persistMessages([
+          { role: "user", content: message },
+          { role: "assistant", content: errorText },
+        ]);
       } finally {
         setVisualLoading(false);
       }
@@ -325,9 +347,7 @@ export function ChatPanel({
   }
 
   function queueVisualRequest(seed?: string) {
-    const concept =
-      seed?.trim() ||
-      "the most important concept in this study set";
+    const concept = seed?.trim() || studySetTitle;
     const message = `Please visualize this concept from my study set using the Xiaohei illustration style: ${concept}`;
     void requestVisualization(message, concept);
   }
@@ -474,11 +494,7 @@ export function ChatPanel({
             variant="outline"
             size="sm"
             disabled={isBusy}
-            onClick={() =>
-              queueVisualRequest(
-                "the most important concept in this study set"
-              )
-            }
+            onClick={() => queueVisualRequest(studySetTitle)}
           >
             <ImageIcon className="h-4 w-4" />
             Create visual explanation

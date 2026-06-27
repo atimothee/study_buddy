@@ -182,10 +182,18 @@ Required environment variables:
 
 - `NEXT_PUBLIC_SENTRY_DSN`
 - `SENTRY_DSN`
-- `SENTRY_AUTH_TOKEN`
-- `SENTRY_ORG`
-- `SENTRY_PROJECT`
+- `SENTRY_AUTH_TOKEN` (also written to `.env.sentry-build-plugin` when you run the Sentry wizard)
+- `SENTRY_ORG` (`my-org-guk`)
+- `SENTRY_PROJECT` (`javascript-nextjs`)
 - `SENTRY_ENVIRONMENT`
+
+To finish wizard setup interactively:
+
+```bash
+npx @sentry/wizard@latest -i nextjs --saas --org my-org-guk --project javascript-nextjs
+```
+
+The wizard will open a browser login, write your DSN into config/env files, and create `.env.sentry-build-plugin` for source map uploads.
 
 ### Privacy
 
