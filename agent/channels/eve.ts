@@ -17,6 +17,7 @@ function studyBuddyOnMessage(ctx: EveMessageContext, message: string | unknown) 
     context: [
       "StudyBuddy session. Client context on this turn includes studySetId and userId when provided by the web app.",
       "Always call getStudySetContext first when you need material context.",
+      "When the user asks to visualize, illustrate, draw, sketch, or diagram a concept, call visualizeConcept immediately with the core concept name.",
       "Persist user and assistant messages with saveChatMessage using the same studySetId and userId.",
       `Latest user message preview: ${text.slice(0, 280)}`,
     ],

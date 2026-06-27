@@ -16,6 +16,10 @@ import {
   stripVisualizationMarker,
   type VisualizationPayload,
 } from "@/lib/visualization";
+import {
+  extractConceptFromMessage,
+  hasVisualIntent,
+} from "@/lib/concept-grounding";
 import type { ChatMessage } from "@/lib/types";
 
 interface ChatPanelProps {
@@ -65,6 +69,7 @@ export function ChatPanel({
   const [error, setError] = useState<string | null>(null);
   const [useFallback, setUseFallback] = useState(false);
   const [fallbackLoading, setFallbackLoading] = useState(false);
+  const [visualLoading, setVisualLoading] = useState(false);
   const [accessToken, setAccessToken] = useState<string | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const lastPersistedRef = useRef<string>("");
@@ -163,8 +168,67 @@ export function ChatPanel({
 
   const isBusy =
     useFallback
-      ? fallbackLoading
-      : agent.status === "submitted" || agent.status === "streaming";
+      ? fallbackLoading || visualLoading
+      : agent.status === "submitted" ||
+        agent.status === "streaming" ||
+        visualLoading;
+
+  const requestVisualization = useCallback(
+    async (message: string, conceptSeed?: string) => {
+      const concept = extractConceptFromMessage(conceptSeed ?? message);
+      setVisualLoading(true);
+      setError(null);
+
+      const optimisticId = `temp-user-${Date.now()}`;
+      const optimisticUser: ChatMessage = {
+        id: optimisticId,
+        study_set_id: studySetId,
+        user_id: userId,
+        role: "user",
+        content: message,
+        created_at: new Date().toISOString(),
+      };
+      setHistory((prev) => [...prev, optimisticUser]);
+
+      try {
+        const res = await fetch("/api/visualize", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            studySetId,
+            concept,
+            userInstruction: message,
+          }),
+        });
+
+        const data = await res.json();
+        if (!res.ok) {
+          throw new Error(data.error ?? "Failed to create visual explanation");
+        }
+
+        const visual = data.visual as VisualizationPayload;
+        const assistantText = `Here's a visual explanation of "${visual.title}" based on your study material.`;
+        const assistantContent = serializeAssistantForPersist(assistantText, [
+          visual,
+        ]);
+
+        setHistory((prev) => prev.filter((m) => m.id !== optimisticId));
+
+        await persistMessages([
+          { role: "user", content: message },
+          { role: "assistant", content: assistantContent },
+        ]);
+      } catch (err) {
+        setError(
+          err instanceof Error ? err.message : "Failed to create visual explanation"
+        );
+        setHistory((prev) => prev.filter((m) => m.id !== optimisticId));
+      } finally {
+        setVisualLoading(false);
+      }
+    },
+    [persistMessages, studySetId, userId]
+  );
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -241,6 +305,11 @@ export function ChatPanel({
     setInput("");
     setError(null);
 
+    if (hasVisualIntent(message)) {
+      await requestVisualization(message);
+      return;
+    }
+
     if (useFallback || !accessToken) {
       await sendFallback(message);
       return;
@@ -258,10 +327,9 @@ export function ChatPanel({
   function queueVisualRequest(seed?: string) {
     const concept =
       seed?.trim() ||
-      "Create a Xiaohei-style visual explanation of the most important concept from my study material.";
-    setInput(
-      `Please visualize this concept from my study set using the Xiaohei illustration style: ${concept}`
-    );
+      "the most important concept in this study set";
+    const message = `Please visualize this concept from my study set using the Xiaohei illustration style: ${concept}`;
+    void requestVisualization(message, concept);
   }
 
   const liveMessages = useMemo(() => {
@@ -367,7 +435,13 @@ export function ChatPanel({
         {renderedLive}
 
         {isBusy && (
-          <LoadingSpinner label="StudyBuddy is thinking..." />
+          <LoadingSpinner
+            label={
+              visualLoading
+                ? "Creating visual explanation..."
+                : "StudyBuddy is thinking..."
+            }
+          />
         )}
 
         <div ref={bottomRef} />

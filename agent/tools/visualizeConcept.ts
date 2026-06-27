@@ -6,6 +6,7 @@ import {
 } from "../lib/study-context.js";
 import { buildVisualizationResult } from "../lib/visualization.js";
 import { captureAppError, withAppSpan } from "../../src/lib/sentry.js";
+import { extractConceptFromMessage } from "../../src/lib/concept-grounding.js";
 
 export default defineTool({
   description:
@@ -17,6 +18,8 @@ export default defineTool({
     userInstruction: z.string().optional(),
   }),
   async execute({ studySetId, userId, concept, userInstruction }, ctx) {
+    const normalizedConcept = extractConceptFromMessage(concept);
+
     try {
       const context = await withAppSpan(
         "agent.visualizeConcept.context",
@@ -29,7 +32,7 @@ export default defineTool({
         return context;
       }
 
-      const grounding = findConceptGrounding(context, concept);
+      const grounding = findConceptGrounding(context, normalizedConcept);
       if (!grounding) {
         return { error: "I don't see that in your study material." };
       }
@@ -48,12 +51,12 @@ export default defineTool({
             feature: "visualization",
             studySetId,
             userId,
-            conceptLength: concept.length,
+            conceptLength: normalizedConcept.length,
           },
           () =>
             buildVisualizationResult(
               context,
-              concept,
+              normalizedConcept,
               userInstruction,
               grounding
             )
@@ -76,7 +79,7 @@ export default defineTool({
           () =>
             buildVisualizationResult(
               context,
-              concept,
+              normalizedConcept,
               userInstruction,
               grounding
             )
@@ -88,7 +91,7 @@ export default defineTool({
         userId,
         studySetId,
         tool: "visualizeConcept",
-        extra: { conceptLength: concept.length },
+        extra: { conceptLength: normalizedConcept.length },
       });
       return { error: "Failed to create visual explanation" };
     }

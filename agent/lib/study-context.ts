@@ -1,5 +1,9 @@
 import { createServiceClient } from "./supabase.js";
 import { captureAppError, withAppSpan } from "../../src/lib/sentry.js";
+import {
+  findBestGroundingSnippet,
+  isConceptGrounded,
+} from "../../src/lib/concept-grounding.js";
 
 export interface StudySetContextResult {
   studySet: {
@@ -157,36 +161,16 @@ export function findConceptGrounding(
   context: StudySetContextResult,
   concept: string
 ): string {
-  const haystack = [
+  const sources = [
     context.studySet.summary ?? "",
     context.studySet.sourceText,
     ...context.flashcards.map((c) => `${c.front} ${c.back}`),
     ...context.quizQuestions.map((q) => `${q.question} ${q.explanation ?? ""}`),
-  ]
-    .join("\n")
-    .toLowerCase();
+  ];
 
-  const terms = concept
-    .toLowerCase()
-    .split(/\s+/)
-    .filter((t) => t.length > 3);
-
-  const matched = terms.some((term) => haystack.includes(term));
-  if (!matched) {
+  if (!isConceptGrounded(sources, concept)) {
     return "";
   }
 
-  const sourceSnippet = context.studySet.sourceText
-    .split(/\n+/)
-    .find((line) =>
-      terms.some((term) => line.toLowerCase().includes(term))
-    );
-
-  return (
-    sourceSnippet?.trim() ||
-    context.flashcards.find((c) =>
-      terms.some((term) => c.front.toLowerCase().includes(term))
-    )?.front ||
-    concept
-  );
+  return findBestGroundingSnippet(sources, concept) || concept;
 }

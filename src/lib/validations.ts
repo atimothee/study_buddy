@@ -17,6 +17,12 @@ export const chatMessageSchema = z.object({
   message: z.string().min(1).max(4000),
 });
 
+export const visualizeConceptSchema = z.object({
+  studySetId: z.string().uuid(),
+  concept: z.string().min(1).max(500),
+  userInstruction: z.string().max(4000).optional(),
+});
+
 export const loginSchema = z.object({
   email: z.string().email("Please enter a valid email"),
   password: z.string().min(6, "Password must be at least 6 characters"),
