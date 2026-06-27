@@ -3,8 +3,10 @@ import {
   isConceptGrounded,
   defaultGroundingFromSources,
 } from "@/lib/concept-grounding";
+import { generateXiaoheiImage } from "@/lib/generate-xiaohei-image";
 import {
   buildXiaoheiIllustrationPrompt,
+  buildXiaoheiImageModelPrompt,
   isXiaoheiSkillAvailable,
   loadXiaoheiSkillRefs,
   XIAOHEI_SKILL_ID,
@@ -79,11 +81,21 @@ export async function buildVisualizationResult(
   }
 
   const refs = skillRefs ?? (await loadXiaoheiSkillRefs());
-  const title = concept.trim() || context.studySet.title;
+  const title = concept.trim().slice(0, 160) || context.studySet.title;
 
   if (!isXiaoheiSkillAvailable(refs)) {
-    return buildFallbackVisualization(title, context.studySet.title, sourceGrounding);
+    return buildFallbackVisualization(
+      title,
+      context.studySet.title,
+      sourceGrounding
+    );
   }
+
+  const imageModelPrompt = buildXiaoheiImageModelPrompt({
+    concept: title,
+    studySetTitle: context.studySet.title,
+    sourceGrounding,
+  });
 
   const illustrationPrompt = buildXiaoheiIllustrationPrompt({
     concept: title,
@@ -93,16 +105,34 @@ export async function buildVisualizationResult(
     refs,
   });
 
-  const shortExplanation = `A Xiaohei-style visual explanation of "${title}" from your study set "${context.studySet.title}", generated with the ${XIAOHEI_SKILL_ID} skill.`;
+  const shortExplanation = `A Xiaohei-style visual explanation of "${title}" from your study set "${context.studySet.title}".`;
+
+  const imageResult = await generateXiaoheiImage(imageModelPrompt);
+
+  if ("dataUrl" in imageResult) {
+    return {
+      title,
+      concept: title,
+      shortExplanation,
+      illustrationPrompt: imageModelPrompt,
+      illustrationOutput: imageResult.dataUrl,
+      illustrationFormat: "image",
+      sourceGrounding,
+      skillId: XIAOHEI_SKILL_ID,
+    };
+  }
+
+  console.warn("Xiaohei image generation unavailable, using diagram fallback:", imageResult.error);
+
+  const fallback = buildFallbackVisualization(
+    title,
+    context.studySet.title,
+    sourceGrounding
+  );
 
   return {
-    title,
-    concept: title,
-    shortExplanation,
+    ...fallback,
     illustrationPrompt,
-    illustrationFormat: "prompt",
-    sourceGrounding,
-    skillId: XIAOHEI_SKILL_ID,
   };
 }
 

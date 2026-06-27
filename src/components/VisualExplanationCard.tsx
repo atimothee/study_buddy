@@ -12,8 +12,6 @@ import {
 } from "@/components/ui/card";
 import type { VisualizationPayload } from "@/lib/visualization";
 
-const XIAOHEI_SKILL_ID = "ian-xiaohei-illustrations-en";
-
 interface VisualExplanationCardProps {
   visual: VisualizationPayload;
 }
@@ -80,15 +78,11 @@ export function VisualExplanationCard({ visual }: VisualExplanationCardProps) {
         {(visual.illustrationFormat === "prompt" || !visual.illustrationOutput) && (
           <div className="rounded-lg border border-dashed border-indigo-200 bg-white p-4">
             <p className="mb-2 text-xs font-medium uppercase tracking-wide text-indigo-600">
-              Xiaohei illustration prompt
+              Illustration unavailable
             </p>
-            <pre className="whitespace-pre-wrap text-sm text-slate-700">
-              {visual.illustrationPrompt}
-            </pre>
-            <p className="mt-3 text-xs text-slate-500">
-              Generated with the {visual.skillId ?? XIAOHEI_SKILL_ID} skill.
-              Image generation is not wired in this deployment; this prompt is
-              ready for manual or future automated generation.
+            <p className="text-sm text-slate-600">
+              We couldn&apos;t generate an image for this concept. Try again, or
+              ask a shorter, more specific concept from your study material.
             </p>
           </div>
         )}
