@@ -22,8 +22,8 @@ StudyBuddy lets students:
 - **Next.js 16** (App Router) + TypeScript + Tailwind CSS
 - **shadcn/ui**-style components
 - **Supabase** — Auth, Postgres, Storage, RLS
-- **Vercel AI SDK** — content generation & chat (fallback)
-- **eve.dev** — scaffolded agent in `/agent` (optional, see below)
+- **Eve by Vercel** — primary study chat agent (`withEve` + `useEveAgent`)
+- **Vercel AI SDK** — study material generation (`/api/generate`, with Eve tool orchestration when available) and fallback chat
 - **Resend** — welcome & study-set-ready emails (optional)
 - **pdf-parse** — PDF text extraction
 
@@ -76,9 +76,8 @@ Open [http://localhost:3000](http://localhost:3000).
 | `NEXT_PUBLIC_APP_URL` | No | App URL for email links |
 | `RESEND_API_KEY` | No | Resend API key for emails (sandbox: only delivers to your Resend account email) |
 | `RESEND_FROM_EMAIL` | No | Sender address; defaults to `StudyBuddy <onboarding@resend.dev>` |
-| `EVE_AGENT_URL` | No | Deployed eve agent URL (future) |
 
-\* Required for eve agent tools; optional for basic app (uses user-scoped Supabase client).  
+\* Required for Eve agent tools (server-side Supabase access in tools).  
 † One of `OPENAI_API_KEY` or `AI_GATEWAY_API_KEY` is required.
 
 ## Database schema
@@ -96,39 +95,105 @@ All tables have Row Level Security — users can only access their own data. See
 
 Supabase redirect URL: `https://your-app.vercel.app/auth/callback`
 
-## eve integration
+## Eve Study Agent
 
-The `/agent` directory contains a scaffolded [eve](https://eve.dev) agent:
+StudyBuddy's chat experience is powered by [Eve by Vercel](https://vercel.com/eve). The agent lives in the `agent/` directory and uses TypeScript tools to retrieve study set context, save chat messages, generate practice questions, and create visual explanations.
+
+The agent is source-grounded. It answers questions using the active study set's source text, summary, flashcards, quiz questions, and recent chat history.
+
+### How chat works
+
+1. User opens `/study-sets/[id]/chat`.
+2. `ChatPanel` uses `useEveAgent` from `eve/react` (same-origin via `withEve()`).
+3. Each turn sends `clientContext` with `studySetId` and `userId`.
+4. The Eve agent calls tools as needed.
+5. Completed turns are persisted through `/api/chat/persist`.
+6. If Eve is unavailable, the UI falls back to `/api/chat`.
+
+### Agent layout
 
 ```
 agent/
-  instructions.md          # StudyBuddy persona & behavior
-  agent.ts                 # defineAgent config
+  instructions.md
+  agent.ts
+  channels/eve.ts
+  lib/
+  skills/ian-xiaohei-illustrations-en/
   tools/
-    getStudySetContext.ts  # Load study set data from Supabase
-    saveChatMessage.ts     # Persist chat messages
+    getStudySetContext.ts
+    saveChatMessage.ts
     generatePracticeQuestion.ts
+    visualizeConcept.ts
 ```
 
-### Current status
-
-The web app uses **`/api/chat`** (Vercel AI SDK + streaming) as the production chat implementation. This is stable and deployable today.
-
-The eve agent is scaffolded and ready for when you want durable, tool-augmented agent sessions:
+### Local development
 
 ```bash
-# Local eve dev (requires eve CLI)
-npx eve@latest start
+npm run dev
 ```
 
-Deploy the eve agent separately with `vercel deploy`, then point `EVE_AGENT_URL` at it and wire the `ChatPanel` to the eve HTTP channel.
+`withEve()` in `next.config.ts` mounts Eve on the same origin as Next.js.
 
-### Fallback chat (`/api/chat`)
+### Production on Vercel
 
-- Streams responses via Vercel AI SDK
-- Injects study set context (source, summary, flashcards, quiz)
-- Persists messages to `chat_messages`
-- Rate limited (10 req/min per user)
+Deploy normally. Ensure `SUPABASE_SERVICE_ROLE_KEY` is set so Eve tools can read/write study data. Chat auth uses the user's Supabase bearer token on Eve HTTP routes.
+
+## Xiaohei Visual Concept Mode
+
+StudyBuddy can create visual explanations using the [`ian-xiaohei-illustrations-en`](https://github.com/tojileon/ian-xiaohei-illustrations-en) skill.
+
+### Where the skill lives
+
+```text
+agent/skills/ian-xiaohei-illustrations-en/
+  SKILL.md
+  references/
+```
+
+Files are vendored from the upstream repository. Eve loads them via `ctx.getSkill("ian-xiaohei-illustrations-en")`.
+
+### How `visualizeConcept` works
+
+1. Verifies study set ownership.
+2. Loads study set context from Supabase.
+3. Confirms the concept is present in the material.
+4. Reads Xiaohei skill references (`prompt-template.md`, `style-dna.md`, `xiaohei-ip.md`).
+5. Returns a grounded `illustrationPrompt`.
+
+### Deployment limitation
+
+The upstream skill expects an `image_gen` tool for PNG output. **This deployment does not run image generation in Vercel production.** `visualizeConcept` returns `illustrationFormat: "prompt"` and the UI shows the skill-compatible prompt. Wire an image provider later for automated rendering.
+
+### Fallback behavior
+
+If Eve is down, chat falls back to `/api/chat`. Visual concept mode requires the Eve agent.
+
+## Fallback chat route
+
+`/api/chat` remains as a temporary fallback when Eve is unavailable. The primary chat UI uses Eve via `useEveAgent`.
+
+## Error Monitoring with Sentry
+
+StudyBuddy uses Sentry for error monitoring and performance tracing across the Next.js app, server actions, API routes, and Eve agent flows.
+
+### Setup
+
+Required environment variables:
+
+- `NEXT_PUBLIC_SENTRY_DSN`
+- `SENTRY_DSN`
+- `SENTRY_AUTH_TOKEN`
+- `SENTRY_ORG`
+- `SENTRY_PROJECT`
+- `SENTRY_ENVIRONMENT`
+
+### Privacy
+
+StudyBuddy does not send source material, chat messages, uploaded files, flashcard text, or quiz answers to Sentry. Only sanitized metadata such as feature name, study set ID, user ID, counts, and error types are captured.
+
+### Local test
+
+In development, visit `/dev/sentry-test` to confirm Sentry is receiving events.
 
 ## Project structure
 
@@ -136,8 +201,8 @@ Deploy the eve agent separately with `vercel deploy`, then point `EVE_AGENT_URL`
 src/
   app/                    # Pages & API routes
   components/             # UI components
-  lib/                    # Supabase, AI, validations
-agent/                    # eve agent (optional)
+  lib/                    # Supabase, AI, validations, visualization helpers
+agent/                    # Eve study chat agent
 supabase/migrations/      # SQL schema
 ```
 
@@ -158,7 +223,8 @@ supabase/migrations/      # SQL schema
 - [x] LLM generation (summary, flashcards, quiz)
 - [x] Interactive flashcard study mode
 - [x] Quiz with scoring & review
-- [x] Chat with StudyBuddy
+- [x] Eve-powered source-grounded chat
+- [x] Xiaohei visual concept mode (prompt-based)
 - [x] Welcome & ready emails (Resend, optional)
 - [x] RLS-secured database
 - [x] Vercel-deployable
