@@ -1,6 +1,23 @@
+import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 import { NextResponse } from "next/server";
 import { PDFParse } from "pdf-parse";
 import { createClient } from "@/lib/supabase/server";
+
+export const runtime = "nodejs";
+export const maxDuration = 60;
+
+let workerConfigured = false;
+
+function configurePdfWorker() {
+  if (workerConfigured) return;
+  const workerPath = join(
+    process.cwd(),
+    "node_modules/pdf-parse/dist/pdf-parse/esm/pdf.worker.mjs"
+  );
+  PDFParse.setWorker(pathToFileURL(workerPath).href);
+  workerConfigured = true;
+}
 
 export async function POST(request: Request) {
   const supabase = await createClient();
@@ -13,6 +30,8 @@ export async function POST(request: Request) {
   }
 
   try {
+    configurePdfWorker();
+
     const formData = await request.formData();
     const file = formData.get("file") as File | null;
 
@@ -27,7 +46,10 @@ export async function POST(request: Request) {
 
     if (!result.text?.trim()) {
       return NextResponse.json(
-        { error: "Could not extract text from PDF" },
+        {
+          error:
+            "Could not extract text from this PDF. It may be scanned or image-only.",
+        },
         { status: 400 }
       );
     }
