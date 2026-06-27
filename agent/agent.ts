@@ -1,12 +1,10 @@
 import { defineAgent } from "eve";
 
 /**
- * StudyBuddy eve agent configuration.
+ * StudyBuddy Eve agent — source-grounded study chat.
+ * Mounted via withEve() in next.config.ts.
  *
- * Deploy with `eve start` locally or `vercel deploy` on Vercel.
- * The web app falls back to /api/chat when EVE_AGENT_URL is not set.
- *
- * @see https://eve.dev/docs/agent-config
+ * @see https://vercel.com/eve
  */
 export default defineAgent({
   model: "openai/gpt-4o-mini",

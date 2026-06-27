@@ -1,58 +1,31 @@
 import { defineTool } from "eve/tools";
 import { z } from "zod";
-import { createServiceClient } from "../../src/lib/supabase/admin";
+import { fetchStudySetContext } from "../lib/study-context.js";
+import { captureAppError, withAppSpan } from "../../src/lib/sentry.js";
 
 export default defineTool({
   description:
-    "Fetch source text, summary, flashcards, and quiz questions for the active study set.",
+    "Fetch the active study set context including source text, summary, flashcards, quiz questions, and recent chat messages.",
   inputSchema: z.object({
     studySetId: z.string().uuid(),
     userId: z.string().uuid(),
   }),
   async execute({ studySetId, userId }) {
-    const supabase = createServiceClient();
-
-    const { data: studySet } = await supabase
-      .from("study_sets")
-      .select("id, title, subject, source_text, summary")
-      .eq("id", studySetId)
-      .eq("user_id", userId)
-      .single();
-
-    if (!studySet) {
-      return { error: "Study set not found" };
+    try {
+      return await withAppSpan(
+        "agent.getStudySetContext",
+        "db.query",
+        { feature: "chat", studySetId, userId, agentTool: "getStudySetContext" },
+        () => fetchStudySetContext(studySetId, userId)
+      );
+    } catch (error) {
+      captureAppError(error, {
+        feature: "chat",
+        userId,
+        studySetId,
+        tool: "getStudySetContext",
+      });
+      return { error: "Failed to load study set context" };
     }
-
-    const { data: flashcards } = await supabase
-      .from("flashcards")
-      .select("front, back, difficulty")
-      .eq("study_set_id", studySetId);
-
-    const { data: quizzes } = await supabase
-      .from("quizzes")
-      .select("id")
-      .eq("study_set_id", studySetId)
-      .limit(1);
-
-    let quizQuestions: Array<{
-      question: string;
-      choices: string[];
-      correct_answer: string;
-      explanation: string | null;
-    }> = [];
-
-    if (quizzes?.[0]) {
-      const { data: questions } = await supabase
-        .from("quiz_questions")
-        .select("question, choices, correct_answer, explanation")
-        .eq("quiz_id", quizzes[0].id);
-
-      quizQuestions = (questions ?? []).map((q) => ({
-        ...q,
-        choices: q.choices as string[],
-      }));
-    }
-
-    return { studySet, flashcards: flashcards ?? [], quizQuestions };
   },
 });
