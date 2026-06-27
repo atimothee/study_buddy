@@ -1,7 +1,26 @@
-import type { SupabaseClient } from "@supabase/supabase-js";
+import type { PostgrestError, SupabaseClient } from "@supabase/supabase-js";
 import type { StudyArtifacts } from "@/lib/study-artifacts/schemas";
 import type { CardType } from "@/lib/types";
 import { captureAppError, withAppSpan } from "@/lib/sentry";
+
+const FLASHCARD_MIGRATION_HINT =
+  "Run supabase/migrations/002_flashcard_card_types.sql in the Supabase SQL editor to enable typed and cloze flashcards.";
+
+function assertSupabaseOk(
+  error: PostgrestError | null,
+  context: string
+): void {
+  if (error) {
+    throw new Error(`${context}: ${error.message}`);
+  }
+}
+
+function isMissingFlashcardColumnError(error: PostgrestError): boolean {
+  return (
+    error.code === "PGRST204" &&
+    /flashcards/i.test(error.message ?? "")
+  );
+}
 
 function normalizeFlashcardForSave(card: StudyArtifacts["flashcards"][number]) {
   let cardType = (card.card_type ?? "basic") as CardType;
@@ -34,6 +53,69 @@ function normalizeFlashcardForSave(card: StudyArtifacts["flashcards"][number]) {
     source_quote: card.source_quote ?? null,
     difficulty: card.difficulty,
   };
+}
+
+function normalizeFlashcardForLegacySave(
+  card: StudyArtifacts["flashcards"][number]
+) {
+  const normalized = normalizeFlashcardForSave(card);
+  let back = normalized.back;
+
+  if (normalized.explanation) {
+    back = `${back}\n\n${normalized.explanation}`;
+  }
+
+  return {
+    front: normalized.front,
+    back,
+    difficulty: normalized.difficulty,
+  };
+}
+
+async function insertFlashcards(
+  supabase: SupabaseClient,
+  studySetId: string,
+  cards: StudyArtifacts["flashcards"]
+): Promise<void> {
+  if (cards.length === 0) return;
+
+  const rows = cards.map((card) => ({
+    study_set_id: studySetId,
+    ...normalizeFlashcardForSave(card),
+  }));
+
+  const { error } = await supabase.from("flashcards").insert(rows);
+
+  if (!error) return;
+
+  if (!isMissingFlashcardColumnError(error)) {
+    assertSupabaseOk(error, "Failed to save flashcards");
+    return;
+  }
+
+  console.warn(
+    "[saveStudyArtifacts] flashcards table is missing typed-card columns; saving basic flashcards only.",
+    FLASHCARD_MIGRATION_HINT
+  );
+  captureAppError(new Error(error.message), {
+    feature: "flashcards",
+    studySetId,
+    tool: "saveStudyArtifacts",
+    extra: {
+      fallback: "legacy_flashcard_schema",
+      migrationHint: FLASHCARD_MIGRATION_HINT,
+    },
+  });
+
+  const legacyRows = cards.map((card) => ({
+    study_set_id: studySetId,
+    ...normalizeFlashcardForLegacySave(card),
+  }));
+
+  const { error: legacyError } = await supabase
+    .from("flashcards")
+    .insert(legacyRows);
+  assertSupabaseOk(legacyError, "Failed to save flashcards (legacy schema)");
 }
 
 export interface SaveStudyArtifactsResult {
@@ -78,37 +160,31 @@ export async function saveStudyArtifactsToDb(
         quizQuestionCount: artifacts.quiz.questions.length,
       },
       async () => {
-        await supabase
+        const { error: summaryError } = await supabase
           .from("study_sets")
           .update({
             summary: artifacts.summary,
             updated_at: new Date().toISOString(),
           })
           .eq("id", studySetId);
+        assertSupabaseOk(summaryError, "Failed to save summary");
 
-        await supabase
+        const { error: deleteFlashcardsError } = await supabase
           .from("flashcards")
           .delete()
           .eq("study_set_id", studySetId);
+        assertSupabaseOk(deleteFlashcardsError, "Failed to clear flashcards");
 
-        if (artifacts.flashcards.length > 0) {
-          await withAppSpan(
-            "saveStudyArtifacts.flashcards",
-            "db.query",
-            {
-              feature: "flashcards",
-              studySetId,
-              flashcardCount: artifacts.flashcards.length,
-            },
-            () =>
-              supabase.from("flashcards").insert(
-                artifacts.flashcards.map((card) => ({
-                  study_set_id: studySetId,
-                  ...normalizeFlashcardForSave(card),
-                }))
-              )
-          );
-        }
+        await withAppSpan(
+          "saveStudyArtifacts.flashcards",
+          "db.query",
+          {
+            feature: "flashcards",
+            studySetId,
+            flashcardCount: artifacts.flashcards.length,
+          },
+          () => insertFlashcards(supabase, studySetId, artifacts.flashcards)
+        );
 
         const { data: existingQuiz } = await supabase
           .from("quizzes")
@@ -119,13 +195,19 @@ export async function saveStudyArtifactsToDb(
         let quizId = existingQuiz?.id;
 
         if (quizId) {
-          await supabase.from("quiz_questions").delete().eq("quiz_id", quizId);
-          await supabase
+          const { error: deleteQuestionsError } = await supabase
+            .from("quiz_questions")
+            .delete()
+            .eq("quiz_id", quizId);
+          assertSupabaseOk(deleteQuestionsError, "Failed to clear quiz questions");
+
+          const { error: updateQuizError } = await supabase
             .from("quizzes")
             .update({ title: artifacts.quiz.title })
             .eq("id", quizId);
+          assertSupabaseOk(updateQuizError, "Failed to update quiz");
         } else {
-          const { data: newQuiz } = await supabase
+          const { data: newQuiz, error: createQuizError } = await supabase
             .from("quizzes")
             .insert({
               study_set_id: studySetId,
@@ -133,6 +215,7 @@ export async function saveStudyArtifactsToDb(
             })
             .select("id")
             .single();
+          assertSupabaseOk(createQuizError, "Failed to create quiz");
           quizId = newQuiz?.id;
         }
 
@@ -145,16 +228,20 @@ export async function saveStudyArtifactsToDb(
               studySetId,
               quizQuestionCount: artifacts.quiz.questions.length,
             },
-            () =>
-              supabase.from("quiz_questions").insert(
-                artifacts.quiz.questions.map((q) => ({
-                  quiz_id: quizId,
-                  question: q.question,
-                  choices: q.choices,
-                  correct_answer: q.correct_answer,
-                  explanation: q.explanation,
-                }))
-              )
+            async () => {
+              const { error: insertQuestionsError } = await supabase
+                .from("quiz_questions")
+                .insert(
+                  artifacts.quiz.questions.map((q) => ({
+                    quiz_id: quizId,
+                    question: q.question,
+                    choices: q.choices,
+                    correct_answer: q.correct_answer,
+                    explanation: q.explanation,
+                  }))
+                );
+              assertSupabaseOk(insertQuestionsError, "Failed to save quiz questions");
+            }
           );
         }
 
