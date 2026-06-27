@@ -2,8 +2,10 @@ import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { generateContentSchema } from "@/lib/validations";
 import { checkRateLimit } from "@/lib/rate-limit";
-import { generateStudyContent } from "@/lib/ai/generation";
+import { runStudyGeneration } from "@/lib/eve/run-study-generation";
 import { sendStudySetReadyEmail } from "@/lib/email";
+import { isSourceTextTooShort } from "@/lib/study-artifacts/generate";
+import { bucketSourceLength, captureAppError, withAppSpan } from "@/lib/sentry";
 
 export const maxDuration = 60;
 
@@ -39,85 +41,41 @@ export async function POST(request: Request) {
 
   const { studySetId } = parsed.data;
 
-  const { data: studySet, error: fetchError } = await supabase
-    .from("study_sets")
-    .select("*")
-    .eq("id", studySetId)
-    .eq("user_id", user.id)
-    .single();
-
-  if (fetchError || !studySet) {
-    return NextResponse.json({ error: "Study set not found" }, { status: 404 });
-  }
-
-  if (!studySet.source_text || studySet.source_text.length < 100) {
-    return NextResponse.json(
-      { error: "Please add at least 100 characters of source material" },
-      { status: 400 }
-    );
-  }
-
   try {
-    const generated = await generateStudyContent(studySet.source_text);
+    const { data: studySet, error: fetchError } = await withAppSpan(
+      "supabase.study_sets.fetch",
+      "db.query",
+      { feature: "study_generation", studySetId, userId: user.id },
+      () =>
+        supabase
+          .from("study_sets")
+          .select("title, source_text")
+          .eq("id", studySetId)
+          .eq("user_id", user.id)
+          .single()
+    );
 
-    await supabase
-      .from("study_sets")
-      .update({
-        summary: generated.summary,
-        updated_at: new Date().toISOString(),
-      })
-      .eq("id", studySetId);
+    if (fetchError || !studySet) {
+      return NextResponse.json({ error: "Study set not found" }, { status: 404 });
+    }
 
-    await supabase.from("flashcards").delete().eq("study_set_id", studySetId);
+    const sourceLengthBucket = bucketSourceLength(
+      studySet.source_text?.length ?? 0
+    );
 
-    if (generated.flashcards.length > 0) {
-      await supabase.from("flashcards").insert(
-        generated.flashcards.map((card) => ({
-          study_set_id: studySetId,
-          front: card.front,
-          back: card.back,
-          difficulty: card.difficulty,
-        }))
+    if (isSourceTextTooShort(studySet.source_text)) {
+      return NextResponse.json(
+        { error: "Please add at least 100 characters of source material" },
+        { status: 400 }
       );
     }
 
-    const { data: existingQuiz } = await supabase
-      .from("quizzes")
-      .select("id")
-      .eq("study_set_id", studySetId)
-      .maybeSingle();
-
-    let quizId = existingQuiz?.id;
-
-    if (quizId) {
-      await supabase.from("quiz_questions").delete().eq("quiz_id", quizId);
-      await supabase
-        .from("quizzes")
-        .update({ title: generated.quiz.title })
-        .eq("id", quizId);
-    } else {
-      const { data: newQuiz } = await supabase
-        .from("quizzes")
-        .insert({
-          study_set_id: studySetId,
-          title: generated.quiz.title,
-        })
-        .select("id")
-        .single();
-      quizId = newQuiz?.id;
-    }
-
-    if (quizId && generated.quiz.questions.length > 0) {
-      await supabase.from("quiz_questions").insert(
-        generated.quiz.questions.map((q) => ({
-          quiz_id: quizId,
-          question: q.question,
-          choices: q.choices,
-          correct_answer: q.correct_answer,
-          explanation: q.explanation,
-        }))
-      );
-    }
+    const saved = await withAppSpan(
+      "study_generation.run",
+      "study.generation",
+      { feature: "study_generation", studySetId, userId: user.id },
+      () => runStudyGeneration(studySetId, user.id)
+    );
 
     if (user.email) {
       await sendStudySetReadyEmail(
@@ -127,11 +85,16 @@ export async function POST(request: Request) {
       ).catch(() => {});
     }
 
-    return NextResponse.json({ success: true, generated });
+    return NextResponse.json({ success: true, saved });
   } catch (err) {
-    console.error("Generation error:", err);
+    captureAppError(err, {
+      feature: "study_generation",
+      userId: user.id,
+      studySetId,
+      tool: "runStudyGeneration",
+    });
     return NextResponse.json(
-      { error: "Failed to generate study materials" },
+      { error: "We could not generate your study materials. Please try again." },
       { status: 500 }
     );
   }
