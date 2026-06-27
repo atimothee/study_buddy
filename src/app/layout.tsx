@@ -13,9 +13,9 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "StudyBuddy — AI-powered study assistant",
+  title: "StudyBuddy — AI-powered study workspace",
   description:
-    "Turn your notes into flashcards, quizzes, and a personal study chat assistant.",
+    "Turn course materials, notes, and readings into flashcards, quizzes, summaries, and a source-grounded study assistant.",
 };
 
 export default function RootLayout({

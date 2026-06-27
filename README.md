@@ -1,8 +1,12 @@
 # StudyBuddy
 
-A NotebookLM-inspired study app that turns your notes into flashcards, quizzes, and a chat-based study assistant.
+StudyBuddy is an AI-powered study workspace that helps students turn their own materials into flashcards, quizzes, summaries, and a source-grounded chat assistant.
+
+Users can create study sets, generate active-recall flashcards, take practice quizzes with explanations, and ask questions about their uploaded material.
 
 ## Product overview
+
+StudyBuddy is an AI-powered study workspace that turns course materials, notes, and readings into flashcards, quizzes, summaries, and a source-grounded study assistant. It helps students practice active recall, test understanding, and chat with their own study materials.
 
 StudyBuddy lets students:
 
@@ -11,7 +15,7 @@ StudyBuddy lets students:
 3. Auto-generate a **summary**, **10–20 flashcards**, and **5–10 quiz questions** via LLM
 4. Study with an interactive **flashcard viewer** (flip, shuffle, self-rating)
 5. Take **quizzes** with instant feedback and explanations
-6. Chat with **StudyBuddy** — grounded in your study material
+6. Chat with **StudyBuddy** — a source-grounded study assistant for their material
 
 ## Tech stack
 
@@ -25,7 +29,7 @@ StudyBuddy lets students:
 
 ## Setup
 
-### 1. Clone and install
+### 1. Install locally
 
 ```bash
 npm install

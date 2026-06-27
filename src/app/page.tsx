@@ -24,9 +24,9 @@ const features = [
   },
   {
     icon: MessageSquare,
-    title: "Study chat",
+    title: "Source-grounded chat",
     description:
-      "Chat with StudyBuddy — grounded in your material, ready to quiz and explain.",
+      "Ask questions, get explanations, and practice with a study assistant grounded in your sources.",
   },
 ];
 
@@ -54,22 +54,22 @@ export default function HomePage() {
         <section className="py-16 text-center md:py-24">
           <div className="mb-6 inline-flex items-center gap-2 rounded-full bg-indigo-100 px-4 py-1.5 text-sm font-medium text-indigo-700">
             <Sparkles className="h-4 w-4" />
-            NotebookLM-inspired study app
+            AI-powered study workspace
           </div>
           <h1 className="mx-auto max-w-3xl text-4xl font-bold tracking-tight text-slate-900 md:text-6xl">
-            Turn your notes into flashcards, quizzes, and a study assistant
+            Study smarter with your own AI study companion
           </h1>
           <p className="mx-auto mt-6 max-w-2xl text-lg text-slate-600">
-            Upload or paste your study material and let StudyBuddy generate
-            personalized flashcards, quizzes, and a chat tutor — all grounded in
-            your content.
+            Paste or upload your notes, readings, or course material. StudyBuddy
+            turns them into flashcards, quizzes, summaries, and a chat assistant
+            grounded in your sources.
           </p>
           <div className="mt-10 flex flex-col items-center justify-center gap-3 sm:flex-row">
             <Button size="lg" asChild>
-              <Link href="/login">Start studying free</Link>
+              <Link href="/login">Start studying</Link>
             </Button>
             <Button size="lg" variant="outline" asChild>
-              <Link href="/login">Create an account</Link>
+              <Link href="/login">Sign in</Link>
             </Button>
           </div>
         </section>
@@ -98,8 +98,7 @@ export default function HomePage() {
             Ready to study smarter?
           </h2>
           <p className="mx-auto mt-3 max-w-lg text-indigo-100">
-            Paste your lecture notes, textbook excerpts, or study guides — we&apos;ll
-            handle the rest.
+            Upload or paste course material and generate study tools instantly.
           </p>
           <Button
             size="lg"
@@ -107,13 +106,13 @@ export default function HomePage() {
             className="mt-6 bg-white text-indigo-700 hover:bg-indigo-50"
             asChild
           >
-            <Link href="/login">Get started</Link>
+            <Link href="/login">Start studying</Link>
           </Button>
         </section>
       </main>
 
       <footer className="border-t border-slate-200 py-8 text-center text-sm text-slate-500">
-        StudyBuddy — built for students who want to learn, not just read.
+        StudyBuddy — a personal study companion for active recall and practice.
       </footer>
     </div>
   );

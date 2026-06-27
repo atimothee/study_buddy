@@ -1,6 +1,7 @@
 {
   "name": "study_buddy",
   "version": "0.1.0",
+  "description": "AI-powered study workspace for flashcards, quizzes, summaries, and source-grounded study chat.",
   "private": true,
   "scripts": {
     "dev": "next dev",
