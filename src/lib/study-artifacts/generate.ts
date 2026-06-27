@@ -1,6 +1,10 @@
 import { generateObject } from "ai";
 import { getGenerationModelCandidates } from "@/lib/ai/client";
 import {
+  extractAiErrorDetails,
+  isInvalidJsonSchemaError,
+} from "@/lib/ai/error-details";
+import {
   buildGenerationSchema,
   MIN_SOURCE_TEXT_LENGTH,
   normalizeGenerationArtifacts,
@@ -34,10 +38,6 @@ function isAuthOrConfigError(message: string): boolean {
   return /missing ai_gateway|missing openai|authentication failed|api key|unauthenticated/i.test(
     message
   );
-}
-
-function isInvalidSchemaError(message: string): boolean {
-  return /invalid schema|invalid_json_schema/i.test(message);
 }
 
 export function isSourceTextTooShort(sourceText: string | null | undefined): boolean {
@@ -81,15 +81,27 @@ export async function generateStudyArtifactsFromSource(
       lastError = error;
       const message =
         error instanceof Error ? error.message : "Unknown generation error";
+      const aiErrorDetails = extractAiErrorDetails(error);
 
       captureAppError(error, {
         feature: "study_generation",
         tool: "generateStudyArtifacts",
-        extra: { sourceLengthBucket, modelIndex: index, message },
+        extra: {
+          sourceLengthBucket,
+          modelIndex: index,
+          ...aiErrorDetails,
+        },
       });
 
+      if (isInvalidJsonSchemaError(error)) {
+        console.error("[generateStudyArtifacts] invalid_json_schema", aiErrorDetails);
+      }
+
       const hasFallback = index < models.length - 1;
-      if (hasFallback && (isAuthOrConfigError(message) || isInvalidSchemaError(message))) {
+      if (
+        hasFallback &&
+        (isAuthOrConfigError(message) || isInvalidJsonSchemaError(error))
+      ) {
         continue;
       }
 
