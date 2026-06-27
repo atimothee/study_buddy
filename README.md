@@ -48,7 +48,9 @@ For production on Vercel, use [Vercel AI Gateway](https://vercel.com/docs/ai-gat
 
 ### 4. Resend (optional)
 
-Set `RESEND_API_KEY` and `RESEND_FROM_EMAIL` to send welcome emails on signup and notifications when study materials are generated.
+**Sandbox (no domain):** set only `RESEND_API_KEY` from [resend.com](https://resend.com). Emails send from `onboarding@resend.dev` and can only be delivered to the email on your Resend account — fine for testing welcome and study-set-ready notifications on yourself.
+
+**Production:** verify your own domain in Resend, then set `RESEND_FROM_EMAIL=StudyBuddy <hello@yourdomain.com>`.
 
 ### 5. Run locally
 
@@ -68,8 +70,8 @@ Open [http://localhost:3000](http://localhost:3000).
 | `OPENAI_API_KEY` | Yes† | OpenAI key for local dev |
 | `AI_GATEWAY_API_KEY` | Yes† | Vercel AI Gateway key for production |
 | `NEXT_PUBLIC_APP_URL` | No | App URL for email links |
-| `RESEND_API_KEY` | No | Resend API key for emails |
-| `RESEND_FROM_EMAIL` | No | Sender address for Resend |
+| `RESEND_API_KEY` | No | Resend API key for emails (sandbox: only delivers to your Resend account email) |
+| `RESEND_FROM_EMAIL` | No | Sender address; defaults to `StudyBuddy <onboarding@resend.dev>` |
 | `EVE_AGENT_URL` | No | Deployed eve agent URL (future) |
 
 \* Required for eve agent tools; optional for basic app (uses user-scoped Supabase client).  
