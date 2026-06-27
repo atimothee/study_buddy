@@ -1,9 +1,11 @@
 "use client";
 
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 import { createStudySet } from "@/app/actions";
 import { AppShell } from "@/components/AppShell";
 import { SourceInput } from "@/components/SourceInput";
+import { LoadingSpinner } from "@/components/LoadingSpinner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -16,9 +18,11 @@ import {
 } from "@/components/ui/card";
 
 export default function NewStudySetPage() {
+  const router = useRouter();
   const [sourceText, setSourceText] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [generating, setGenerating] = useState(false);
 
   async function handleSubmit(formData: FormData) {
     setLoading(true);
@@ -29,7 +33,50 @@ export default function NewStudySetPage() {
     if (result?.error) {
       setError(result.error);
       setLoading(false);
+      return;
     }
+
+    if (!result?.studySetId) {
+      setError("Failed to create study set");
+      setLoading(false);
+      return;
+    }
+
+    setGenerating(true);
+
+    try {
+      const res = await fetch("/api/generate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ studySetId: result.studySetId }),
+      });
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        throw new Error(data.error ?? "Generation failed");
+      }
+
+      router.push(`/study-sets/${result.studySetId}`);
+    } catch (err) {
+      setGenerating(false);
+      setLoading(false);
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Study set created, but generation failed. Open the study set to try again."
+      );
+    }
+  }
+
+  if (generating) {
+    return (
+      <AppShell>
+        <div className="mx-auto flex max-w-2xl flex-col items-center justify-center py-24">
+          <LoadingSpinner label="Generating your study materials..." />
+        </div>
+      </AppShell>
+    );
   }
 
   return (
@@ -39,8 +86,8 @@ export default function NewStudySetPage() {
           <CardHeader>
             <CardTitle>Create a new study set</CardTitle>
             <CardDescription>
-              Add a title and paste or upload your study material. You can
-              generate flashcards and quizzes on the next screen.
+              Add a title and paste or upload your study material. We&apos;ll
+              generate flashcards, a quiz, and a summary with Eve.
             </CardDescription>
           </CardHeader>
           <CardContent>

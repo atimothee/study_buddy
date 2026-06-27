@@ -37,6 +37,7 @@ export default async function ChatPage({ params }: PageProps) {
         </h1>
         <ChatPanel
           studySetId={id}
+          userId={user.id}
           initialMessages={messages ?? []}
         />
       </div>

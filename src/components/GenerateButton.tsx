@@ -9,21 +9,25 @@ import { LoadingSpinner } from "@/components/LoadingSpinner";
 interface GenerateButtonProps {
   studySetId: string;
   hasContent: boolean;
+  label?: string;
   onGenerated?: () => void;
 }
 
 export function GenerateButton({
   studySetId,
   hasContent,
+  label = "Generate study materials",
   onGenerated,
 }: GenerateButtonProps) {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
+  const [success, setSuccess] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   async function handleGenerate() {
     setLoading(true);
     setError(null);
+    setSuccess(false);
 
     try {
       const res = await fetch("/api/generate", {
@@ -38,6 +42,7 @@ export function GenerateButton({
         throw new Error(data.error ?? "Generation failed");
       }
 
+      setSuccess(true);
       onGenerated?.();
       router.refresh();
     } catch (err) {
@@ -48,7 +53,7 @@ export function GenerateButton({
   }
 
   if (loading) {
-    return <LoadingSpinner label="Generating flashcards, quiz, and summary..." />;
+    return <LoadingSpinner label="Generating your study materials..." />;
   }
 
   return (
@@ -60,11 +65,16 @@ export function GenerateButton({
         className="w-full sm:w-auto"
       >
         <Sparkles className="h-4 w-4" />
-        Generate study materials
+        {label}
       </Button>
       {!hasContent && (
         <p className="text-sm text-slate-500">
           Add source material before generating.
+        </p>
+      )}
+      {success && (
+        <p className="text-sm text-green-700">
+          Study materials generated successfully.
         </p>
       )}
       {error && <p className="text-sm text-red-600">{error}</p>}

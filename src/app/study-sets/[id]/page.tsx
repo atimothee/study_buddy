@@ -148,7 +148,7 @@ export default async function StudySetPage({ params }: PageProps) {
         {hasGenerated && (
           <Card>
             <CardHeader>
-              <CardTitle>Regenerate</CardTitle>
+              <CardTitle>Regenerate study materials</CardTitle>
               <CardDescription>
                 Generate new flashcards and quiz questions from your source
                 material. This replaces existing content.
@@ -158,6 +158,7 @@ export default async function StudySetPage({ params }: PageProps) {
               <GenerateButton
                 studySetId={id}
                 hasContent={(studySet.source_text?.length ?? 0) >= 100}
+                label="Regenerate study materials"
               />
             </CardContent>
           </Card>
