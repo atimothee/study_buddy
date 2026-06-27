@@ -1,5 +1,5 @@
 import { generateObject } from "ai";
-import { openai } from "@/lib/ai/client";
+import { getGenerationModel } from "@/lib/ai/client";
 import {
   buildGenerationSchema,
   MIN_SOURCE_TEXT_LENGTH,
@@ -47,7 +47,7 @@ export async function generateStudyArtifactsFromSource(
       { feature: "study_generation", sourceLengthBucket },
       () =>
         generateObject({
-          model: openai("gpt-4o-mini"),
+          model: getGenerationModel(),
           schema,
           system: SYSTEM_PROMPT,
           prompt: `Generate study materials from this source text:\n\n${sourceText}`,
@@ -61,6 +61,15 @@ export async function generateStudyArtifactsFromSource(
       tool: "generateStudyArtifacts",
       extra: { sourceLengthBucket },
     });
+
+    const message =
+      error instanceof Error ? error.message : "Unknown generation error";
+    if (/missing ai_gateway|missing openai|authentication failed|api key/i.test(message)) {
+      throw new Error(
+        "AI generation is not configured. Set AI_GATEWAY_API_KEY or OPENAI_API_KEY on the server."
+      );
+    }
+
     throw new Error("We could not generate your study materials. Please try again.");
   }
 }

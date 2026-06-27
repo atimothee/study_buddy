@@ -10,6 +10,7 @@
     "lint": "eslint"
   },
   "dependencies": {
+    "@ai-sdk/gateway": "^4.0.3",
     "@ai-sdk/openai": "^4.0.1",
     "@radix-ui/react-avatar": "^1.2.0",
     "@radix-ui/react-dropdown-menu": "^2.1.18",

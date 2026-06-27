@@ -10,6 +10,19 @@ export const cardTypeSchema = z.enum([
   "application",
 ]);
 
+/** OpenAI structured output requires every property to be required (use null for absent values). */
+export const generationFlashcardSchema = z.object({
+  card_type: cardTypeSchema,
+  front: z.string(),
+  back: z.string(),
+  cloze_text: z.string().nullable(),
+  answer: z.string().nullable(),
+  explanation: z.string().nullable(),
+  tags: z.array(z.string()).nullable(),
+  source_quote: z.string().nullable(),
+  difficulty: z.enum(["easy", "medium", "hard"]),
+});
+
 export const flashcardSchema = z.object({
   card_type: cardTypeSchema.default("basic"),
   front: z.string(),
@@ -61,7 +74,7 @@ export function buildGenerationSchema(options?: GenerateStudyArtifactsOptions) {
   return z.object({
     summary: z.string(),
     flashcards: z
-      .array(flashcardSchema)
+      .array(generationFlashcardSchema)
       .min(options?.includeFlashcards === false ? 0 : flashcardMin)
       .max(flashcardMax),
     quiz: z.object({
